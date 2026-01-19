@@ -54,7 +54,7 @@ func main() {
 			admin = models.User{
 				ID:       uuid.New().String(),
 				Username: "admin",
-				Email:    "admin@devconnect.com",
+				Email:    "admin@appnity.cloud",
 				Password: string(hash),
 				Role:     "ADMIN",
 				Image:    "https://api.dicebear.com/7.x/avataaars/svg?seed=admin",
