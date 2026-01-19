@@ -45,7 +45,7 @@ type Snippet struct {
 
 	// Relations
 	AuthorID string `gorm:"column:authorId" json:"authorId"`
-	Author   User   `gorm:"constraint:OnUpdate:CASCADE,OnDelete:CASCADE;foreignKey:AuthorID" json:"author"`
+	Author   User   `gorm:"foreignKey:AuthorID" json:"author"`
 
 	ForkedFromID *string  `gorm:"column:forkedFromId" json:"forkedFromId"`
 	ForkedFrom   *Snippet `gorm:"foreignKey:ForkedFromID" json:"forkedFrom,omitempty"`

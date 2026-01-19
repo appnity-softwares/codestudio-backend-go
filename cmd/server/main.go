@@ -24,9 +24,9 @@ func main() {
 	// Auto Migrate
 	err := database.DB.AutoMigrate(
 		&models.User{},
-		&models.Snippet{},
+		&models.Event{},   // Events might exist before snippets
+		&models.Snippet{}, // Snippets depend on User
 		&models.Message{},
-		&models.Event{},
 		&models.Registration{},
 		&models.Submission{},
 		&models.Problem{},

@@ -18,8 +18,8 @@ func main() {
 	log.Println("🔄 Running migrations (just in case)...")
 	err := database.DB.AutoMigrate(
 		&models.User{},
-		&models.Snippet{},
 		&models.Event{},
+		&models.Snippet{},
 		&models.Submission{},
 		&models.Registration{},
 		&models.Problem{},
