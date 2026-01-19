@@ -16,7 +16,7 @@ func main() {
 	database.Connect()
 
 	log.Println("🔄 Running migrations (just in case)...")
-	database.DB.AutoMigrate(
+	err := database.DB.AutoMigrate(
 		&models.User{},
 		&models.Snippet{},
 		&models.Event{},
@@ -36,6 +36,9 @@ func main() {
 		&models.SubmissionMetrics{},
 		&models.TestCase{},
 	)
+	if err != nil {
+		log.Fatalf("❌ Failed to run migrations: %v", err)
+	}
 
 	log.Println("🗑️  Clearing Tables (EXCEPT Users)...")
 	// Note: We use CASCADE to clean up related data

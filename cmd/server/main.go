@@ -22,7 +22,7 @@ func main() {
 	database.Connect()
 
 	// Auto Migrate
-	database.DB.AutoMigrate(
+	err := database.DB.AutoMigrate(
 		&models.User{},
 		&models.Snippet{},
 		&models.Message{},
@@ -47,6 +47,9 @@ func main() {
 		&models.EntityView{},
 		&models.EntityCopy{},
 	)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("Failed to run database migrations")
+	}
 
 	// 3. Init OAuth
 	handlers.InitOAuthConfig()
