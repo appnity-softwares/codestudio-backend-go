@@ -15,8 +15,11 @@ func main() {
 	config.LoadConfig()
 	database.Connect()
 
-	log.Println("🔄 Running migrations (just in case)...")
-	err := database.DB.AutoMigrate(
+	log.Println("🔄 Running migrations (Stage 1: Tables)...")
+	// Temporarily disable foreign key constraints to break circular dependency (User <-> Snippet)
+	database.DB.Config.DisableForeignKeyConstraintWhenMigrating = true
+
+	migrationModels := []interface{}{
 		&models.User{},
 		&models.Event{},
 		&models.Snippet{},
@@ -26,7 +29,6 @@ func main() {
 		&models.ChangelogEntry{},
 		&models.PracticeProblem{},
 		&models.PracticeSubmission{},
-		// Admin models
 		&models.AdminAction{},
 		&models.UserSuspension{},
 		&models.TrustScoreHistory{},
@@ -35,9 +37,19 @@ func main() {
 		&models.SubmissionFlag{},
 		&models.SubmissionMetrics{},
 		&models.TestCase{},
-	)
-	if err != nil {
-		log.Fatalf("❌ Failed to run migrations: %v", err)
+	}
+
+	for _, m := range migrationModels {
+		if err := database.DB.AutoMigrate(m); err != nil {
+			log.Fatalf("❌ Failed to migrate table for %T: %v", m, err)
+		}
+	}
+
+	log.Println("🔄 Running migrations (Stage 2: Constraints)...")
+	// Re-enable and add all foreign key constraints via ALTER TABLE
+	database.DB.Config.DisableForeignKeyConstraintWhenMigrating = false
+	if err := database.DB.AutoMigrate(migrationModels...); err != nil {
+		log.Fatalf("❌ Failed to add constraints: %v", err)
 	}
 
 	log.Println("🗑️  Clearing Tables (EXCEPT Users)...")

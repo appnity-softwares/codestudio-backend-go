@@ -21,11 +21,16 @@ func main() {
 	// 2. Connect Database
 	database.Connect()
 
-	// Auto Migrate
-	err := database.DB.AutoMigrate(
+	// --- Database Migration Stage ---
+	logger.Info().Msg("🔄 Running Database Migrations (Stage 1: Tables)...")
+
+	// Temporarily disable foreign key constraints to handle circular dependencies (User <-> Snippet)
+	database.DB.Config.DisableForeignKeyConstraintWhenMigrating = true
+
+	tableModels := []interface{}{
 		&models.User{},
-		&models.Event{},   // Events might exist before snippets
-		&models.Snippet{}, // Snippets depend on User
+		&models.Event{},
+		&models.Snippet{},
 		&models.Message{},
 		&models.Registration{},
 		&models.Submission{},
@@ -34,22 +39,30 @@ func main() {
 		&models.ChangelogEntry{},
 		&models.SubmissionFlag{},
 		&models.SubmissionMetrics{},
-		// v1.2: Practice Arena
 		&models.PracticeProblem{},
 		&models.PracticeSubmission{},
-		// Admin models
 		&models.AdminAction{},
 		&models.UserSuspension{},
 		&models.TrustScoreHistory{},
 		&models.SystemSettings{},
 		&models.AdminAuditLog{},
-		// Tracking models
 		&models.EntityView{},
 		&models.EntityCopy{},
-	)
-	if err != nil {
-		logger.Fatal().Err(err).Msg("Failed to run database migrations")
 	}
+
+	for _, m := range tableModels {
+		if err := database.DB.AutoMigrate(m); err != nil {
+			logger.Fatal().Err(err).Msgf("Failed to migrate table for %T", m)
+		}
+	}
+
+	logger.Info().Msg("🔄 Running Database Migrations (Stage 2: Constraints)...")
+	// Re-enable and run again to add all foreign key constraints
+	database.DB.Config.DisableForeignKeyConstraintWhenMigrating = false
+	if err := database.DB.AutoMigrate(tableModels...); err != nil {
+		logger.Fatal().Err(err).Msg("Failed to add database constraints")
+	}
+	logger.Info().Msg("✅ Database Migrations Complete")
 
 	// 3. Init OAuth
 	handlers.InitOAuthConfig()
