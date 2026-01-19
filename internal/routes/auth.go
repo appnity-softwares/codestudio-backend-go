@@ -1,0 +1,24 @@
+package routes
+
+import (
+	"github.com/gin-gonic/gin"
+	"github.com/pushp314/devconnect-backend/internal/handlers"
+	"github.com/pushp314/devconnect-backend/internal/middleware"
+)
+
+func RegisterAuthRoutes(r gin.IRouter) {
+	r.POST("/register", middleware.RequireRegistrationOpen(), handlers.Register)
+	r.POST("/login", handlers.Login)
+	r.POST("/logout", handlers.Logout)
+
+	// OAuth
+	r.GET("/google/login", handlers.GoogleLogin)
+	r.GET("/google/callback", handlers.GoogleCallback)
+
+	r.GET("/github/login", handlers.GithubLogin)
+	r.GET("/github/callback", handlers.GithubCallback)
+
+	// Password Reset
+	r.POST("/forgot-password", handlers.ForgotPassword)
+	r.POST("/reset-password", handlers.ResetPassword)
+}
