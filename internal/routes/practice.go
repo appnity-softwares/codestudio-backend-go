@@ -20,6 +20,7 @@ func RegisterPracticeRoutes(r gin.IRouter) {
 		protected := practice.Group("")
 		protected.Use(middleware.AuthMiddleware())
 		{
+			protected.POST("/run", handlers.RunPracticeSolution)
 			protected.POST("/submit", handlers.SubmitPracticeSolution)
 			protected.GET("/submissions", handlers.GetUserPracticeSubmissions)
 		}
