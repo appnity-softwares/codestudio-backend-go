@@ -12,6 +12,7 @@ import (
 	"github.com/pushp314/devconnect-backend/internal/database"
 	"github.com/pushp314/devconnect-backend/internal/models"
 	"github.com/pushp314/devconnect-backend/pkg/utils"
+	"gorm.io/gorm"
 )
 
 // -- Inputs -- //
@@ -244,7 +245,15 @@ func RegisterForEvent(c *gin.Context) {
 		CreatedAt: time.Now(),
 	}
 
-	database.DB.Create(&registration)
+	if err := database.DB.Create(&registration).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to register for event"})
+		return
+	}
+
+	// Increment User's Contest Count
+	strUserID := userID.(string)
+	database.DB.Model(&models.User{ID: strUserID}).Update("wrapped_contest_count", gorm.Expr("wrapped_contest_count + ?", 1))
+
 	c.JSON(http.StatusOK, registration)
 }
 
@@ -303,6 +312,10 @@ func AcceptRules(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to join event"})
 			return
 		}
+
+		// Increment User's Contest Count
+		database.DB.Model(&models.User{ID: uid}).Update("wrapped_contest_count", gorm.Expr("wrapped_contest_count + ?", 1))
+
 		c.JSON(http.StatusOK, gin.H{"message": "Joined contest and accepted rules", "joined": true})
 		return
 	}

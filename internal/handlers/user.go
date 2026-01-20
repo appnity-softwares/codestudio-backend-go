@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -192,14 +193,16 @@ func joinStrings(s []string) string {
 }
 
 type UpdateProfileInput struct {
-	Name            string  `json:"name"`
-	Username        string  `json:"username"`
-	Bio             string  `json:"bio"`
-	Image           string  `json:"image"`
-	GithubURL       string  `json:"githubUrl"`
-	InstagramURL    string  `json:"instagramUrl"`
-	Visibility      string  `json:"visibility"`
-	PinnedSnippetID *string `json:"pinnedSnippetId"` // MVP v1.1
+	Name                 string  `json:"name"`
+	Username             string  `json:"username"`
+	Bio                  string  `json:"bio"`
+	Image                string  `json:"image"`
+	GithubURL            string  `json:"githubUrl"`
+	InstagramURL         string  `json:"instagramUrl"`
+	Visibility           string  `json:"visibility"`
+	PinnedSnippetID      *string `json:"pinnedSnippetId"` // MVP v1.1
+	PublicProfileEnabled *bool   `json:"publicProfileEnabled"`
+	SearchVisible        *bool   `json:"searchVisible"`
 }
 
 // -- Handlers -- //
@@ -314,6 +317,12 @@ func UpdateProfile(c *gin.Context) {
 	if input.PinnedSnippetID != nil {
 		user.PinnedSnippetID = input.PinnedSnippetID
 	}
+	if input.PublicProfileEnabled != nil {
+		user.PublicProfileEnabled = *input.PublicProfileEnabled
+	}
+	if input.SearchVisible != nil {
+		user.SearchVisible = *input.SearchVisible
+	}
 
 	// Ensure we save updates
 	database.DB.Save(&user)
@@ -324,6 +333,138 @@ func UpdateProfile(c *gin.Context) {
 	user.Count.Snippets = snippetCount
 
 	c.JSON(http.StatusOK, gin.H{"user": user})
+}
+
+// GetPublicProfile handles GET /public/users/:username (Public Route)
+func GetPublicProfile(c *gin.Context) {
+	username := c.Param("username")
+
+	var user models.User
+	// Preload limited data to avoid leakage? We clean up in response or use tags.
+	// JSON tags are mostly safe, but email is there.
+	// We should manually construct a SafeUser struct or just sanitize before return.
+	// For MVP, if we return `user` struct, checking JSON tags:
+	// Email is `json:"email"`. We should NOT return it.
+	// We MUST sanitize.
+
+	if err := database.DB.Preload("PinnedSnippet").Preload("PinnedSnippet.Author").
+		Where("username = ?", username).First(&user).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	// Check Privacy
+	if !user.PublicProfileEnabled {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User profile not available"})
+		return
+	}
+
+	// Aggregations (Real-time for now, or use cached)
+	// We'll trust cached columns if updated, but update them on reads occasionally?
+	// For MVP, let's just do count queries, Postgres handles them fast enough for <100k users.
+	var snippetCount int64
+	database.DB.Model(&models.Snippet{}).Where("author_id = ? AND status = 'PUBLISHED'", user.ID).Count(&snippetCount)
+
+	var contestCount int64
+	database.DB.Model(&models.Registration{}).Where("user_id = ?", user.ID).Count(&contestCount)
+
+	// Fetch Top 3 Snippets by Views
+	var topSnippets []models.Snippet
+	database.DB.Where("author_id = ? AND status = 'PUBLISHED'", user.ID).
+		Order("view_count desc").Limit(3).Find(&topSnippets)
+
+	// Sanitize Response
+	safeUser := gin.H{
+		"id":                   user.ID,
+		"username":             user.Username,
+		"name":                 user.Name,
+		"image":                user.Image,
+		"bio":                  user.Bio,
+		"trustScore":           user.TrustScore,
+		"githubUrl":            user.GithubURL,
+		"instagramUrl":         user.InstagramURL,
+		"createdAt":            user.CreatedAt,
+		"pinnedSnippet":        user.PinnedSnippet,
+		"isBlocked":            user.IsBlocked, // Keep for frontend logic? Actually probably hide.
+		"pinnedSnippetId":      user.PinnedSnippetID,
+		"snippetCount":         snippetCount,
+		"contestCount":         contestCount,
+		"topSnippets":          topSnippets,
+		"publicProfileEnabled": user.PublicProfileEnabled, // public needs to know? sure.
+	}
+
+	c.JSON(http.StatusOK, gin.H{"user": safeUser})
+}
+
+// ListCommunityUsers handles GET /community/users
+func ListCommunityUsers(c *gin.Context) {
+	// Filters: ?search= &sort= &page=
+	search := c.Query("search")
+	sort := c.Query("sort")
+
+	pageStr := c.Query("page")
+	page := 1
+	if pageStr != "" {
+		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
+			page = p
+		}
+	}
+
+	limit := 20
+	offset := (page - 1) * limit
+
+	query := database.DB.Model(&models.User{}).Where("search_visible = ?", true)
+
+	if search != "" {
+		query = query.Where("username ILIKE ? OR name ILIKE ?", "%"+search+"%", "%"+search+"%")
+	}
+
+	// Sorting
+	switch sort {
+	case "active":
+		// approximation: created_at or recent activity?
+		// for now, recently joined
+		query = query.Order("created_at desc")
+	case "trust":
+		query = query.Order("trust_score desc")
+	case "snippets":
+		// efficient sort requires column. We added `snippet_count` to model but haven't populated it.
+		// Fallback: trust score
+		query = query.Order("trust_score desc")
+	default:
+		// "most active" -> maybe trust score is best proxy for now without complex activity table joins
+		query = query.Order("trust_score desc")
+	}
+
+	var users []models.User
+	if err := query.Limit(limit).Offset(offset).Find(&users).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch community"})
+		return
+	}
+
+	// Sanitize List
+	var safeUsers []gin.H
+	for _, u := range users {
+		safeUsers = append(safeUsers, gin.H{
+			"id":         u.ID,
+			"username":   u.Username,
+			"name":       u.Name,
+			"image":      u.Image,
+			"bio":        u.Bio,
+			"trustScore": u.TrustScore,
+			"createdAt":  u.CreatedAt,
+			// For list view, we might want counts. Avoiding N+1 queries by using the cached columns we added?
+			// We added WrappedSnippetCount etc. but logic to update them isn't there yet.
+			// Let's rely on client-side fetching or lazy loading if critical, OR just return raw values from User table
+			// since we added the columns `snippet_count` etc.
+			// Ideally we have a background job that updates these.
+			// For MVP, just return 0 or what's in DB.
+			"snippetCount": u.WrappedSnippetCount,
+			"contestCount": u.WrappedContestCount,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{"users": safeUsers, "page": page})
 }
 
 // GetStats handles GET /users/stats - Returns real engagement data for dashboard

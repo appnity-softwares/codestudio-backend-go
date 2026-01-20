@@ -20,6 +20,7 @@ func main() {
 
 	// 2. Connect Database
 	database.Connect()
+	database.InitRedis() // Initialize Redis
 
 	// --- Database Migration Stage ---
 	logger.Info().Msg("🔄 Running Database Migrations (Stage 1: Tables)...")
@@ -48,6 +49,8 @@ func main() {
 		&models.AdminAuditLog{},
 		&models.EntityView{},
 		&models.EntityCopy{},
+		&models.FeedbackMessage{},
+		&models.FeedbackReaction{},
 	}
 
 	for _, m := range tableModels {
@@ -68,7 +71,7 @@ func main() {
 	handlers.InitOAuthConfig()
 
 	// 4. Setup Router
-	r := gin.New()
+	r := gin.Default()
 
 	// Middlewares
 	r.Use(middleware.LoggingMiddleware())
@@ -107,6 +110,7 @@ func main() {
 		routes.SetupChangelogRoutes(api)         // Public changelog - no maintenance check
 		routes.RegisterAdminRoutes(api)          // Admin routes bypass maintenance
 		routes.RegisterPracticeRoutes(protected) // v1.2: Practice Arena
+		routes.RegisterFeedbackRoutes(api)       // Feedback Wall Routes (Hybrid Public/Protected)
 	}
 
 	r.GET("/health", func(c *gin.Context) {

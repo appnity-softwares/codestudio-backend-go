@@ -7,10 +7,12 @@ import (
 )
 
 type Config struct {
-	Port        string `mapstructure:"PORT"`
-	DatabaseURL string `mapstructure:"DATABASE_URL"`
-	JWTSecret   string `mapstructure:"JWT_SECRET"`
-	FrontendURL string `mapstructure:"FRONTEND_URL"`
+	Port          string `mapstructure:"PORT"`
+	DatabaseURL   string `mapstructure:"DATABASE_URL"`
+	RedisAddr     string `mapstructure:"REDIS_ADDR"`
+	RedisPassword string `mapstructure:"REDIS_PASSWORD"`
+	JWTSecret     string `mapstructure:"JWT_SECRET"`
+	FrontendURL   string `mapstructure:"FRONTEND_URL"`
 
 	// OAuth
 	GoogleClientID     string `mapstructure:"GOOGLE_CLIENT_ID"`

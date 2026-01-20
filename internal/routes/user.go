@@ -20,10 +20,10 @@ func RegisterUserRoutes(r gin.IRouter) {
 
 		// Public (Wildcard last)
 		// users.GET("", handlers.ListUsers) // Community list disabled for MVP
-		users.GET("/profile/summary", handlers.GetProfileSummary)
+		users.GET("/profile/summary", handlers.GetProfileSummary) // /users/profile/summary
 		users.GET("/:username", handlers.GetProfile)
 		users.GET("/:username/snippets", handlers.GetUserSnippets)
-		users.GET("/:username/badges", handlers.GetBadges) // Register badges route
+		users.GET("/:username/badges", handlers.GetBadges)
 
 		// History (Authenticated)
 		users.GET("/me/contests", middleware.AuthMiddleware(), handlers.GetMyContestHistory)
@@ -31,4 +31,8 @@ func RegisterUserRoutes(r gin.IRouter) {
 		// Onboarding (Authenticated)
 		users.POST("/onboarding", middleware.AuthMiddleware(), handlers.CompleteOnboarding)
 	}
+
+	// Community & Public Profile Routes (Root under /api usually)
+	r.GET("/community/users", handlers.ListCommunityUsers)
+	r.GET("/public/users/:username", handlers.GetPublicProfile)
 }

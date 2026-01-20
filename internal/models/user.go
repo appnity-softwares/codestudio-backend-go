@@ -60,6 +60,16 @@ type User struct {
 	UsernameChangeCount  int       `gorm:"default:0" json:"usernameChangeCount"`
 	LastUsernameChangeAt time.Time `json:"lastUsernameChangeAt"`
 
+	// Privacy settings
+	PublicProfileEnabled bool `gorm:"default:true" json:"publicProfileEnabled"`
+	SearchVisible        bool `gorm:"default:true" json:"searchVisible"`
+
+	// Cached Counters (for Leaderboard/Community performance)
+	WrappedSnippetCount int `gorm:"default:0;column:snippet_count" json:"snippetCount"`
+	WrappedForkCount    int `gorm:"default:0;column:fork_count" json:"forkCount"`
+	WrappedViewCount    int `gorm:"default:0;column:view_count" json:"viewCount"`
+	WrappedContestCount int `gorm:"default:0;column:contest_count" json:"contestCount"`
+
 	ResetToken       string    `json:"-"`
 	ResetTokenExpiry time.Time `json:"-"`
 
