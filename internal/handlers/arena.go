@@ -56,8 +56,25 @@ func ListEvents(c *gin.Context) {
 	}
 
 	var response []EventListResponse
+	now := time.Now()
 
 	for _, event := range events {
+		// Lazy Status Update: Check if event should be ENDED or LIVE
+		updated := false
+		if event.Status != models.EventStatusEnded && now.After(event.EndTime) {
+			event.Status = models.EventStatusEnded
+			updated = true
+		} else if event.Status == models.EventStatusUpcoming && now.After(event.StartTime) && now.Before(event.EndTime) {
+			event.Status = models.EventStatusLive
+			updated = true
+		}
+
+		if updated {
+			// Update DB asynchronously to avoid blocking read path significantly
+			// Or synchronously if critical. Sync is safer for now.
+			database.DB.Model(&event).Update("status", event.Status)
+		}
+
 		// 1. Count Participants
 		var participantCount int64
 		database.DB.Model(&models.Registration{}).Where("event_id = ?", event.ID).Count(&participantCount)
@@ -108,6 +125,21 @@ func GetEvent(c *gin.Context) {
 	if result := database.DB.Preload("Problems").First(&event, "id = ?", id); result.Error != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
 		return
+	}
+
+	// Lazy Status Update
+	now := time.Now()
+	updated := false
+	if event.Status != models.EventStatusEnded && now.After(event.EndTime) {
+		event.Status = models.EventStatusEnded
+		updated = true
+	} else if event.Status == models.EventStatusUpcoming && now.After(event.StartTime) && now.Before(event.EndTime) {
+		event.Status = models.EventStatusLive
+		updated = true
+	}
+
+	if updated {
+		database.DB.Model(&event).Update("status", event.Status)
 	}
 
 	// Calculate Metadata
