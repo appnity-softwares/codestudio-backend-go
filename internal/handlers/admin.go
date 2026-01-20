@@ -367,6 +367,8 @@ func AdminGetDashboard(c *gin.Context) {
 func AdminListUsers(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	search := c.Query("search") // Unified search param
+
 	if page < 1 {
 		page = 1
 	}
@@ -375,11 +377,18 @@ func AdminListUsers(c *gin.Context) {
 	}
 	offset := (page - 1) * limit
 
-	var users []models.User
+	users := []models.User{} // Initialize as empty slice, not nil
 	var total int64
 
-	database.DB.Model(&models.User{}).Count(&total)
-	database.DB.Order("created_at desc").Offset(offset).Limit(limit).Find(&users)
+	query := database.DB.Model(&models.User{})
+
+	if search != "" {
+		searchPattern := "%" + search + "%"
+		query = query.Where("email ILIKE ? OR username ILIKE ? OR id = ?", searchPattern, searchPattern, search)
+	}
+
+	query.Count(&total)
+	query.Order("created_at desc").Offset(offset).Limit(limit).Find(&users)
 
 	c.JSON(http.StatusOK, gin.H{
 		"users": users,
