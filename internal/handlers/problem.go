@@ -399,10 +399,11 @@ func SubmitSolution(c *gin.Context) {
 
 	// CRITICAL: Contest Time Lock (Server Time Enforcement)
 	// CRITICAL: Contest Time Lock (Server Time Enforcement)
+	isLateSubmission := false
 	if event.ID != "practice-arena-mvp" {
 		if event.Status == "ENDED" || time.Now().UTC().After(event.EndTime) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Contest has ended. Submissions are no longer accepted."})
-			return
+			isLateSubmission = true
+			// We allow submission for practice/upsolving, but scores won't count.
 		}
 	}
 
@@ -662,7 +663,7 @@ func SubmitSolution(c *gin.Context) {
 	// EXECUTION LOGIC (Piston)
 	// Why loop? Because we have multiple test cases.
 	// We run them sequentially.
-	go func(subID string, prob models.Problem, userCode, lang string) {
+	go func(subID string, prob models.Problem, userCode, lang string, isLate bool) {
 		// Re-fetch submission to update later
 		var sub models.Submission
 		database.DB.First(&sub, "id = ?", subID)
@@ -766,8 +767,8 @@ func SubmitSolution(c *gin.Context) {
 
 		database.DB.Save(&sub)
 
-		// Update Registration Score if AC
-		if allPassed && prob.Points > 0 {
+		// Update Registration Score if AC (Only if ON TIME)
+		if allPassed && prob.Points > 0 && !isLate {
 			var reg models.Registration
 			if err := database.DB.Where("user_id = ? AND event_id = ?", sub.UserID, sub.EventID).First(&reg).Error; err == nil {
 				// Check if already solved correctly before?
@@ -785,7 +786,7 @@ func SubmitSolution(c *gin.Context) {
 			}
 		}
 
-	}(submission.ID, problem, input.Code, input.Language)
+	}(submission.ID, problem, input.Code, input.Language, isLateSubmission)
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":    "Submission received",
