@@ -54,9 +54,10 @@ func main() {
 	// Note: We use CASCADE to clean up related data
 	// We do NOT truncate "User" table to preserve admin accounts.
 	tablesToTruncate := []string{
-		"snippets", "events", "problems", "submissions",
+		"\"Snippet\"", "events", "problems", "submissions",
 		"registrations", "changelog_entries",
 		"practice_problems", "practice_submissions",
+		"submission_flags", "submission_metrics", "test_cases",
 	}
 
 	for _, table := range tablesToTruncate {
