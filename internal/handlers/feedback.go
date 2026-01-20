@@ -18,14 +18,14 @@ func CreateFeedback(c *gin.Context) {
 		return
 	}
 
-	// 1. Rate Limiting (3 messages per hour)
-	allowed, err := database.CheckRateLimit(userID, 3, time.Hour)
+	// 1. Rate Limiting (1 message per 30 seconds)
+	allowed, err := database.CheckRateLimit(userID, 1, 30*time.Second)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Rate limit check failed"})
 		return
 	}
 	if !allowed {
-		c.JSON(http.StatusTooManyRequests, gin.H{"error": "You can only post 3 feedback messages per hour. Please wait a bit."})
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "You're sending messages too fast. Please wait 30 seconds."})
 		return
 	}
 
