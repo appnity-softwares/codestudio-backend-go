@@ -1,6 +1,13 @@
 package main
 
 import (
+	"context"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
 	"github.com/gin-gonic/gin"
 	"github.com/pushp314/devconnect-backend/internal/config"
 	"github.com/pushp314/devconnect-backend/internal/database"
@@ -12,11 +19,22 @@ import (
 )
 
 func main() {
-	// 0. Initialize Logger
+	// 0. Load Config & Initialize Logger
 	config.LoadConfig()
-	logger.Init("development")
 
-	logger.Info().Msg("Starting DevConnect Backend...")
+	// Environment-based logger initialization (production = JSON, development = pretty)
+	env := os.Getenv("GO_ENV")
+	if env == "" {
+		env = "development"
+	}
+	logger.Init(env)
+
+	logger.Info().Str("environment", env).Msg("Starting CodeStudio Backend...")
+
+	// Set Gin mode based on environment
+	if env == "production" {
+		gin.SetMode(gin.ReleaseMode)
+	}
 
 	// 2. Connect Database
 	database.Connect()
@@ -114,10 +132,38 @@ func main() {
 		routes.RegisterFeedbackRoutes(api)       // Feedback Wall Routes (Hybrid Public/Protected)
 	}
 
+	// Enhanced health check with DB and Redis status
 	r.GET("/health", func(c *gin.Context) {
+		dbStatus := "ok"
+		redisStatus := "ok"
+
+		// Check database connection
+		sqlDB, err := database.DB.DB()
+		if err != nil || sqlDB.Ping() != nil {
+			dbStatus = "error"
+		}
+
+		// Check Redis connection
+		if database.Redis != nil {
+			if _, err := database.Redis.Ping(context.Background()).Result(); err != nil {
+				redisStatus = "error"
+			}
+		} else {
+			redisStatus = "not configured"
+		}
+
+		status := "ok"
+		if dbStatus != "ok" || (redisStatus != "ok" && redisStatus != "not configured") {
+			status = "degraded"
+		}
+
 		c.JSON(200, gin.H{
-			"status":  "ok",
-			"message": "DevConnect Go Backend is running 🚀",
+			"status":  status,
+			"message": "CodeStudio Backend is running 🚀",
+			"checks": gin.H{
+				"database": dbStatus,
+				"redis":    redisStatus,
+			},
 		})
 	})
 
@@ -133,13 +179,43 @@ func main() {
 	r.GET("/socket.io/*any", handlers.SocketHandler(socketServer))
 	r.POST("/socket.io/*any", handlers.SocketHandler(socketServer))
 
-	// 6. Start Server
+	// 6. Start Server with graceful shutdown
 	port := config.AppConfig.Port
 	if port == "" {
 		port = "8080"
 	}
-	logger.Info().Str("port", port).Msg("Server starting")
-	if err := r.Run(":" + port); err != nil {
-		logger.Fatal().Err(err).Msg("Failed to start server")
+
+	// Create HTTP server with timeouts
+	srv := &http.Server{
+		Addr:         ":" + port,
+		Handler:      r,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
+
+	// Start server in goroutine
+	go func() {
+		logger.Info().Str("port", port).Str("env", env).Msg("Server starting")
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Fatal().Err(err).Msg("Failed to start server")
+		}
+	}()
+
+	// Wait for interrupt signal to gracefully shutdown the server
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	logger.Info().Msg("🛑 Shutting down server gracefully...")
+
+	// Give outstanding requests 10 seconds to complete
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		logger.Fatal().Err(err).Msg("Server forced to shutdown")
+	}
+
+	logger.Info().Msg("✅ Server exited gracefully")
 }

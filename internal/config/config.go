@@ -8,6 +8,7 @@ import (
 
 type Config struct {
 	Port          string `mapstructure:"PORT"`
+	GoEnv         string `mapstructure:"GO_ENV"`
 	DatabaseURL   string `mapstructure:"DATABASE_URL"`
 	RedisAddr     string `mapstructure:"REDIS_ADDR"`
 	RedisPassword string `mapstructure:"REDIS_PASSWORD"`

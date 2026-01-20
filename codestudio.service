@@ -1,0 +1,30 @@
+[Unit]
+Description=CodeStudio Backend API
+After=network.target postgresql.service redis.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/codestudio/backend
+ExecStart=/var/www/codestudio/backend/main
+Restart=always
+RestartSec=5
+
+# Production environment
+Environment=GO_ENV=production
+Environment=GIN_MODE=release
+Environment=PORT=8080
+
+# Load secrets from .env file
+EnvironmentFile=/var/www/codestudio/backend/.env
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/www/codestudio/backend
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

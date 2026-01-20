@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -87,13 +88,19 @@ func GetFeedback(c *gin.Context) {
 	var messages []models.FeedbackMessage
 	query := database.DB.Preload("User").Model(&models.FeedbackMessage{})
 
+	// Filter hidden messages for public view
+	query = query.Where("is_hidden = ?", false)
+
+	// Pinned messages first, then sort by upvotes or date
 	if sort == "top" {
-		query = query.Order("upvotes DESC, created_at DESC")
+		query = query.Order("is_pinned DESC, upvotes DESC, created_at DESC")
 	} else {
-		query = query.Order("created_at DESC")
+		query = query.Order("is_pinned DESC, created_at DESC")
 	}
 
-	query.Limit(50).Offset(0) // Simplified
+	// Parse offset for proper pagination
+	offsetInt, _ := strconv.Atoi(offset)
+	query = query.Limit(50).Offset(offsetInt)
 
 	if err := query.Find(&messages).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch feedback"})

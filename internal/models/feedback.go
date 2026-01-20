@@ -14,6 +14,17 @@ const (
 	CategoryOther       FeedbackCategory = "OTHER"
 )
 
+// FeedbackStatus represents the lifecycle status of feedback
+type FeedbackStatus string
+
+const (
+	StatusOpen      FeedbackStatus = "OPEN"
+	StatusReviewing FeedbackStatus = "REVIEWING"
+	StatusPlanned   FeedbackStatus = "PLANNED"
+	StatusShipped   FeedbackStatus = "SHIPPED"
+	StatusClosed    FeedbackStatus = "CLOSED"
+)
+
 type FeedbackMessage struct {
 	ID        string           `gorm:"primaryKey;type:uuid;default:gen_random_uuid()" json:"id"`
 	UserID    string           `gorm:"index" json:"userId"`
@@ -22,8 +33,16 @@ type FeedbackMessage struct {
 	Category  FeedbackCategory `gorm:"type:text;default:'OTHER'" json:"category"`
 	Upvotes   int              `gorm:"default:0" json:"upvotes"`
 	Downvotes int              `gorm:"default:0" json:"downvotes"`
-	IsAck     bool             `gorm:"default:false" json:"isAck"` // Acknowledged by team
-	CreatedAt time.Time        `json:"createdAt"`
+	IsAck     bool             `gorm:"default:false" json:"isAck"` // Legacy: Acknowledged by team
+
+	// Status Lifecycle
+	Status      FeedbackStatus `gorm:"type:text;default:'OPEN'" json:"status"`
+	IsLocked    bool           `gorm:"default:false" json:"isLocked"` // Lock voting/replies
+	IsPinned    bool           `gorm:"default:false" json:"isPinned"` // Pin to top
+	IsHidden    bool           `gorm:"default:false" json:"isHidden"` // Hidden from public view
+	ChangelogID *string        `json:"changelogId,omitempty"`         // Link to changelog entry
+
+	CreatedAt time.Time `json:"createdAt"`
 
 	// Virtual fields for checking if current user reacted
 	HasReacted   bool `gorm:"-" json:"hasReacted"`

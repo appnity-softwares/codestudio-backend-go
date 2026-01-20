@@ -416,7 +416,8 @@ func ListCommunityUsers(c *gin.Context) {
 	query := database.DB.Model(&models.User{}).Where("search_visible = ?", true)
 
 	if search != "" {
-		query = query.Where("username ILIKE ? OR name ILIKE ?", "%"+search+"%", "%"+search+"%")
+		searchLike := utils.SanitizeSearchQuery(search)
+		query = query.Where("username ILIKE ? OR name ILIKE ?", searchLike, searchLike)
 	}
 
 	// Sorting

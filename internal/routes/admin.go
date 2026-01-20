@@ -77,4 +77,12 @@ func RegisterAdminRoutes(rg *gin.RouterGroup) {
 	admin.POST("/changelog", handlers.AdminCreateChangelog)
 	admin.PUT("/changelog/:id", handlers.AdminUpdateChangelog)
 	admin.DELETE("/changelog/:id", handlers.AdminDeleteChangelog)
+
+	// Feedback Moderation
+	admin.GET("/feedback", handlers.AdminListFeedback)
+	admin.PUT("/feedback/:id/status", handlers.AdminUpdateFeedbackStatus)
+	admin.POST("/feedback/:id/lock", handlers.AdminLockFeedback)
+	admin.POST("/feedback/:id/hide", handlers.AdminHideFeedback)
+	admin.POST("/feedback/:id/pin", handlers.AdminPinFeedback)
+	admin.POST("/feedback/:id/convert", handlers.AdminConvertToChangelog)
 }

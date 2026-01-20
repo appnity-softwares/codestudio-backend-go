@@ -42,13 +42,19 @@ func ListPracticeProblems(c *gin.Context) {
 		return
 	}
 
-	// If user is authenticated, add their solve status
+	// If user is authenticated, add their solve status (batch query to avoid N+1)
 	userID, exists := c.Get("userId")
-	if exists {
-		// Get user's solved problem IDs
+	if exists && len(problems) > 0 {
+		// Collect problem IDs
+		problemIDs := make([]string, len(problems))
+		for i, p := range problems {
+			problemIDs[i] = p.ID
+		}
+
+		// Single query to get all solved problem IDs for this user
 		var solvedIDs []string
 		database.DB.Model(&models.PracticeSubmission{}).
-			Where("user_id = ? AND status = ?", userID, "ACCEPTED").
+			Where("user_id = ? AND status = ? AND problem_id IN ?", userID, "ACCEPTED", problemIDs).
 			Distinct("problem_id").
 			Pluck("problem_id", &solvedIDs)
 

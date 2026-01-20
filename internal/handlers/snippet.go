@@ -52,7 +52,7 @@ func ListSnippets(c *gin.Context) {
 	// Filtering
 	search := c.Query("search")
 	if search != "" {
-		searchLike := "%" + search + "%"
+		searchLike := utils.SanitizeSearchQuery(search)
 		query = query.Where("title ILIKE ? OR description ILIKE ?", searchLike, searchLike)
 	}
 

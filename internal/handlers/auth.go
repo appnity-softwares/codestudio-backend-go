@@ -408,8 +408,7 @@ func ForgotPassword(c *gin.Context) {
 	fmt.Printf("\n🔗 Reset Link: %s/auth/reset-password?token=%s\n\n", config.AppConfig.FrontendURL, resetToken)
 
 	c.JSON(http.StatusOK, gin.H{
-		"message":   "If this email is registered, you will receive a password reset link.",
-		"dev_token": resetToken, // For testing convenience
+		"message": "If this email is registered, you will receive a password reset link.",
 	})
 }
 
