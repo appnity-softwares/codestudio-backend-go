@@ -24,12 +24,18 @@ type Event struct {
 	Type        string `gorm:"default:'INTERNAL'" json:"type"` // INTERNAL, EXTERNAL
 	ExternalURL string `json:"externalUrl"`
 
-	StartTime time.Time `json:"startTime"`
-	EndTime   time.Time `json:"endTime"`
+	StartTime  time.Time  `json:"startTime"`
+	EndTime    time.Time  `json:"endTime"`
 	FreezeTime *time.Time `json:"freezeTime"` // Optional, nil if no freeze
 
 	Price  float64     `json:"price"` // 0 for free
 	Status EventStatus `gorm:"type:text;default:'UPCOMING'" json:"status"`
+
+	// --- External Contest Fields ---
+	IsExternal            bool      `gorm:"column:isExternal;default:false" json:"isExternal"`
+	ExternalPlatform      string    `gorm:"column:externalPlatform" json:"externalPlatform"` // HACKERRANK, CODEFORCES, CUSTOM
+	ExternalJoinURL       string    `gorm:"column:externalJoinUrl" json:"externalJoinUrl"`   // Masked in standard API
+	ExternalJoinVisibleAt time.Time `gorm:"column:externalJoinVisibleAt" json:"externalJoinVisibleAt"`
 
 	CreatedBy string `json:"createdBy"`
 	Creator   User   `gorm:"foreignKey:CreatedBy" json:"creator"`
@@ -73,6 +79,8 @@ type RegistrationStatus string
 const (
 	RegStatusPending RegistrationStatus = "PENDING"
 	RegStatusPaid    RegistrationStatus = "PAID"
+	RegStatusJoined  RegistrationStatus = "JOINED"
+	RegStatusNoShow  RegistrationStatus = "NO_SHOW"
 )
 
 type Registration struct {
@@ -88,6 +96,8 @@ type Registration struct {
 
 	Score int `json:"score"`
 	Rank  int `json:"rank"`
+
+	JoinedExternalAt *time.Time `gorm:"column:joinedExternalAt" json:"joinedExternalAt"`
 
 	User  User  `gorm:"foreignKey:UserID" json:"user,omitempty"`
 	Event Event `gorm:"foreignKey:EventID" json:"event,omitempty"`

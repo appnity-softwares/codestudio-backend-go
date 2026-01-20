@@ -19,6 +19,7 @@ func RegisterArenaRoutes(r gin.IRouter) {
 		{
 			protected.POST("/:id/register", middleware.RequireContestsEnabled(), handlers.RegisterForEvent)
 			protected.POST("/:id/rules", middleware.RequireContestsEnabled(), handlers.AcceptRules)
+			protected.POST("/:id/join-external", handlers.JoinExternalContest)
 			protected.GET("/:id/access", handlers.GetEventAccess) // THE GATEKEEPER
 
 			// Admin only

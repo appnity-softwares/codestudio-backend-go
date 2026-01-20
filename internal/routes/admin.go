@@ -22,6 +22,7 @@ func RegisterAdminRoutes(rg *gin.RouterGroup) {
 	admin.POST("/contests/:id/start", handlers.AdminStartContest)
 	admin.POST("/contests/:id/freeze", handlers.AdminFreezeContest)
 	admin.POST("/contests/:id/end", handlers.AdminEndContest)
+	admin.GET("/contests/:id/participants", handlers.AdminGetContestParticipants)
 
 	// Problem Management
 	admin.GET("/problems/:id", handlers.AdminGetProblem)

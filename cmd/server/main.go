@@ -116,6 +116,10 @@ func main() {
 		})
 	})
 
+	// Sitemap & SEO
+	r.GET("/sitemap.xml", handlers.GenerateSitemap)
+	r.GET("/robots.txt", handlers.GenerateRobotsTXT)
+
 	// Init Socket.io
 	socketServer := handlers.InitSocketServer()
 	defer socketServer.Close()

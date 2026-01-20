@@ -137,6 +137,9 @@ func GetEvent(c *gin.Context) {
 		}
 	}
 
+	// Security: Mask ExternalJoinURL unless it's the Join endpoint
+	event.ExternalJoinURL = ""
+
 	c.JSON(http.StatusOK, gin.H{
 		"event": event,
 		"metadata": gin.H{
@@ -363,4 +366,55 @@ func CreateEvent(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"event": event})
+}
+
+// JoinExternalContest handles POST /events/:id/join-external
+func JoinExternalContest(c *gin.Context) {
+	id := c.Param("id")
+	userID, exists := c.Get("userId")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	var event models.Event
+	if result := database.DB.First(&event, "id = ?", id); result.Error != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
+		return
+	}
+
+	if !event.IsExternal {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "This is not an external contest"})
+		return
+	}
+
+	// 1. Validate Registration
+	var registration models.Registration
+	if err := database.DB.Where("user_id = ? AND event_id = ?", userID, id).First(&registration).Error; err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Registration required to join contest"})
+		return
+	}
+
+	// 2. Validate Time Window
+	now := time.Now()
+	if now.Before(event.ExternalJoinVisibleAt) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Join link is not yet visible"})
+		return
+	}
+	if now.After(event.EndTime) {
+		c.JSON(http.StatusGone, gin.H{"error": "Contest has already ended"})
+		return
+	}
+
+	// 3. Log Join Time
+	nowJoined := time.Now()
+	registration.JoinedExternalAt = &nowJoined
+	registration.Status = models.RegStatusJoined
+	database.DB.Save(&registration)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":  true,
+		"url":      event.ExternalJoinURL,
+		"joinedAt": nowJoined,
+	})
 }

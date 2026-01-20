@@ -37,6 +37,10 @@ func AdminCreateContest(c *gin.Context) {
 		ExternalURL string     `json:"externalUrl"` // Required if EXTERNAL
 		Banner      string     `json:"banner"`
 		Price       float64    `json:"price"` // For paid contests
+		IsExternal  bool       `json:"isExternal"`
+		Platform    string     `json:"platform"`
+		JoinURL     string     `json:"joinUrl"`
+		VisibleAt   *time.Time `json:"visibleAt"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -44,28 +48,38 @@ func AdminCreateContest(c *gin.Context) {
 		return
 	}
 
-	// Validate External URL if type is EXTERNAL
-	if req.Type == "EXTERNAL" && req.ExternalURL == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "External URL is required for external contests"})
+	// Validate External URL logic
+	if req.IsExternal && req.JoinURL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Join URL is required for external contests"})
 		return
 	}
 
 	event := models.Event{
-		ID:          uuid.New().String(),
-		Title:       req.Title,
-		Slug:        utils.GenerateSlug(req.Title),
-		Description: req.Description,
-		StartTime:   req.StartTime,
-		EndTime:     req.EndTime,
-		FreezeTime:  req.FreezeTime,
-		Status:      models.EventStatusDraft, // Default to DRAFT, not Upcoming
-		CreatedBy:   adminID,
-		Banner:      req.Banner,
-		Type:        req.Type,
-		ExternalURL: req.ExternalURL,
-		Price:       req.Price,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		ID:               uuid.New().String(),
+		Title:            req.Title,
+		Slug:             utils.GenerateSlug(req.Title),
+		Description:      req.Description,
+		StartTime:        req.StartTime,
+		EndTime:          req.EndTime,
+		FreezeTime:       req.FreezeTime,
+		Status:           models.EventStatusDraft, // Default to DRAFT, not Upcoming
+		CreatedBy:        adminID,
+		Banner:           req.Banner,
+		Type:             req.Type,
+		ExternalURL:      req.ExternalURL,
+		Price:            req.Price,
+		IsExternal:       req.IsExternal,
+		ExternalPlatform: req.Platform,
+		ExternalJoinURL:  req.JoinURL,
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+	}
+
+	// Auto-calculate visible time if not provided
+	if req.VisibleAt == nil {
+		event.ExternalJoinVisibleAt = req.StartTime.Add(-15 * time.Minute)
+	} else {
+		event.ExternalJoinVisibleAt = *req.VisibleAt
 	}
 
 	if event.Type == "" {
@@ -96,6 +110,10 @@ func AdminUpdateContest(c *gin.Context) {
 		ExternalURL string     `json:"externalUrl"`
 		Banner      string     `json:"banner"`
 		Price       float64    `json:"price"`
+		IsExternal  *bool      `json:"isExternal"`
+		Platform    string     `json:"platform"`
+		JoinURL     string     `json:"joinUrl"`
+		VisibleAt   *time.Time `json:"visibleAt"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -133,14 +151,23 @@ func AdminUpdateContest(c *gin.Context) {
 			updates["end_time"] = req.EndTime
 		}
 		updates["freeze_time"] = req.FreezeTime // Nullable
-		if req.Type != "" {
-			updates["type"] = req.Type
-		}
 		if req.ExternalURL != "" {
 			updates["external_url"] = req.ExternalURL
 		}
 		if req.Banner != "" {
 			updates["banner"] = req.Banner
+		}
+		if req.IsExternal != nil {
+			updates["isExternal"] = *req.IsExternal
+		}
+		if req.Platform != "" {
+			updates["externalPlatform"] = req.Platform
+		}
+		if req.JoinURL != "" {
+			updates["externalJoinUrl"] = req.JoinURL
+		}
+		if req.VisibleAt != nil {
+			updates["externalJoinVisibleAt"] = *req.VisibleAt
 		}
 		updates["price"] = req.Price
 		updates["updated_at"] = time.Now()
@@ -255,4 +282,29 @@ func AdminEndContest(c *gin.Context) {
 		return
 	}
 	c.JSON(200, gin.H{"message": "Contest Ended"})
+}
+
+func AdminGetContestParticipants(c *gin.Context) {
+	eventID := c.Param("id")
+
+	var registrations []models.Registration
+	if err := database.DB.Preload("User").Where("event_id = ?", eventID).Find(&registrations).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch registrations"})
+		return
+	}
+
+	var stats struct {
+		TotalRegistered int64 `json:"totalRegistered"`
+		JoinedExternal  int64 `json:"joinedExternal"`
+		NoShows         int64 `json:"noShows"`
+	}
+
+	database.DB.Model(&models.Registration{}).Where("event_id = ?", eventID).Count(&stats.TotalRegistered)
+	database.DB.Model(&models.Registration{}).Where("event_id = ? AND status = ?", eventID, models.RegStatusJoined).Count(&stats.JoinedExternal)
+	database.DB.Model(&models.Registration{}).Where("event_id = ? AND joined_external_at IS NULL AND status != ?", eventID, models.RegStatusJoined).Count(&stats.NoShows)
+
+	c.JSON(http.StatusOK, gin.H{
+		"stats":        stats,
+		"participants": registrations,
+	})
 }
