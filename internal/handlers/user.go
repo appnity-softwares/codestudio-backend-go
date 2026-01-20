@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pushp314/devconnect-backend/internal/database"
@@ -128,8 +130,70 @@ func GetProfileSummary(c *gin.Context) {
 }
 
 // -- Inputs -- //
+// UpdateMeInput defines fields user can update
+type UpdateMeInput struct {
+	Name           *string  `json:"name"`
+	Bio            *string  `json:"bio"`
+	GithubURL      *string  `json:"githubUrl"`
+	InstagramURL   *string  `json:"instagramUrl"`
+	Visibility     *string  `json:"visibility"`
+	Onboarding     *bool    `json:"onboardingCompleted"`
+	PreferredLangs []string `json:"preferredLanguages"`
+	Interests      []string `json:"interests"`
+}
+
+type OnboardingInput struct {
+	Bio       string   `json:"bio"`
+	Languages []string `json:"languages"`
+	Interests []string `json:"interests"`
+}
+
+func CompleteOnboarding(c *gin.Context) {
+	userID := c.GetString("userID")
+	var input OnboardingInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var user models.User
+	if err := database.DB.First(&user, "id = ?", userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	// Helper to create pointer to array string
+	langs := fmt.Sprintf("{%s}", joinStrings(input.Languages))
+	interests := fmt.Sprintf("{%s}", joinStrings(input.Interests))
+
+	user.Bio = input.Bio
+	user.PreferredLanguages = &langs
+	user.Interests = &interests
+	user.OnboardingCompleted = true
+
+	if err := database.DB.Save(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update profile"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Onboarding completed", "user": user})
+}
+
+// Helper for array string formating
+func joinStrings(s []string) string {
+	res := ""
+	for i, v := range s {
+		if i > 0 {
+			res += ","
+		}
+		res += fmt.Sprintf("\"%s\"", v)
+	}
+	return res
+}
+
 type UpdateProfileInput struct {
 	Name            string  `json:"name"`
+	Username        string  `json:"username"`
 	Bio             string  `json:"bio"`
 	Image           string  `json:"image"`
 	GithubURL       string  `json:"githubUrl"`
@@ -199,6 +263,38 @@ func UpdateProfile(c *gin.Context) {
 	if input.Name != "" {
 		user.Name = input.Name
 	}
+
+	// Username Change Logic (Limit: 2 changes per 90 days)
+	if input.Username != "" && input.Username != user.Username {
+		// Verify uniqueness
+		var count int64
+		database.DB.Model(&models.User{}).Where("username = ?", input.Username).Count(&count)
+		if count > 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Username already taken"})
+			return
+		}
+
+		// Check Limits
+		now := time.Now()
+		daysSinceLastChange := now.Sub(user.LastUsernameChangeAt).Hours() / 24
+
+		if daysSinceLastChange < 90 {
+			if user.UsernameChangeCount >= 2 {
+				c.JSON(http.StatusForbidden, gin.H{
+					"error": fmt.Sprintf("Username change limit reached. You can change it again in %d days.", int(90-daysSinceLastChange)),
+				})
+				return
+			}
+			user.UsernameChangeCount++
+		} else {
+			// Reset window if > 90 days
+			user.UsernameChangeCount = 1
+		}
+
+		user.Username = input.Username
+		user.LastUsernameChangeAt = now
+	}
+
 	// Allow empty bio updates? If strict MVP, maybe. But standard is yes.
 	if input.Bio != "" {
 		user.Bio = input.Bio
@@ -332,4 +428,25 @@ func GetUserSnippets(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"snippets": snippets})
+}
+
+// GetBadges handles GET /users/:username/badges
+func GetBadges(c *gin.Context) {
+	username := c.Param("username")
+
+	var user models.User
+	if err := database.DB.Where("username = ? OR id = ?", username, username).First(&user).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	var userBadges []models.UserBadge
+	// Preload the Badge definition
+	if err := database.DB.Preload("Badge").Where("user_id = ?", user.ID).Find(&userBadges).Error; err != nil {
+		fmt.Printf("Error fetching badges for user %s: %v\n", user.ID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to fetch badges: %v", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"badges": userBadges})
 }

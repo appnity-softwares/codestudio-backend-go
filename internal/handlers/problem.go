@@ -398,9 +398,12 @@ func SubmitSolution(c *gin.Context) {
 	}
 
 	// CRITICAL: Contest Time Lock (Server Time Enforcement)
-	if event.ID != "practice-arena-mvp" && time.Now().UTC().After(event.EndTime) {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Contest has ended. Submissions are no longer accepted."})
-		return
+	// CRITICAL: Contest Time Lock (Server Time Enforcement)
+	if event.ID != "practice-arena-mvp" {
+		if event.Status == "ENDED" || time.Now().UTC().After(event.EndTime) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Contest has ended. Submissions are no longer accepted."})
+			return
+		}
 	}
 
 	// Rule: Registration Check (skip for practice)

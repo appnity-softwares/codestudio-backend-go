@@ -158,6 +158,33 @@ func Logout(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Successfully logged out"})
 }
 
+func CheckUsername(c *gin.Context) {
+	username := c.Query("username")
+	if len(username) < 3 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Username too short"})
+		return
+	}
+
+	var count int64
+	database.DB.Model(&models.User{}).Where("username = ?", username).Count(&count)
+
+	if count > 0 {
+		// Simple suggestion logic
+		suggestions := []string{
+			fmt.Sprintf("%s_dev", username),
+			fmt.Sprintf("%s_code", username),
+			fmt.Sprintf("%s%d", username, time.Now().Unix()%100),
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"available":   false,
+			"suggestions": suggestions,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"available": true})
+}
+
 // --- OAuth ---
 
 var (

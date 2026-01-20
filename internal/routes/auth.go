@@ -21,4 +21,7 @@ func RegisterAuthRoutes(r gin.IRouter) {
 	// Password Reset
 	r.POST("/forgot-password", handlers.ForgotPassword)
 	r.POST("/reset-password", handlers.ResetPassword)
+
+	// Utils
+	r.GET("/check-username", handlers.CheckUsername)
 }

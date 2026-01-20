@@ -26,6 +26,7 @@ type Snippet struct {
 	OutputSnapshot    string         `gorm:"type:text" json:"outputSnapshot"`
 	PreviewType       string         `gorm:"default:'TERMINAL'" json:"previewType"` // TERMINAL, WEB_PREVIEW
 	ExecutionLanguage string         `gorm:"column:executionLanguage" json:"executionLanguage"`
+	Runtime           float64        `gorm:"default:0" json:"runtime"` // ms
 
 	// MVP v1.1: Rich Attributes
 	Type       string `gorm:"default:'ALGORITHM'" json:"type"`    // ALGORITHM, UTILITY, EXAMPLE, VISUAL

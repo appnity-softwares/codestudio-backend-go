@@ -23,5 +23,12 @@ func RegisterUserRoutes(r gin.IRouter) {
 		users.GET("/profile/summary", handlers.GetProfileSummary)
 		users.GET("/:username", handlers.GetProfile)
 		users.GET("/:username/snippets", handlers.GetUserSnippets)
+		users.GET("/:username/badges", handlers.GetBadges) // Register badges route
+
+		// History (Authenticated)
+		users.GET("/me/contests", middleware.AuthMiddleware(), handlers.GetMyContestHistory)
+
+		// Onboarding (Authenticated)
+		users.POST("/onboarding", middleware.AuthMiddleware(), handlers.CompleteOnboarding)
 	}
 }

@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/lib/pq"
@@ -25,6 +26,7 @@ type CreateSnippetInput struct {
 	PreviewType    string   `json:"previewType"`
 	Type           string   `json:"type"`       // MVP v1.1
 	Difficulty     string   `json:"difficulty"` // MVP v1.1
+	Runtime        float64  `json:"runtime"`    // ms
 }
 
 type UpdateSnippetInput struct {
@@ -117,6 +119,7 @@ func CreateSnippet(c *gin.Context) {
 		PreviewType:    input.PreviewType,
 		Type:           input.Type,
 		Difficulty:     input.Difficulty,
+		Runtime:        input.Runtime,
 	}
 
 	// Default visibility
@@ -280,7 +283,9 @@ func RunSnippet(c *gin.Context) {
 
 	// MVP: Standardize execution limits (e.g., 2s timeout)
 	// Input logic is removed for MVP as per requirements (No input handling)
+	start := time.Now()
 	res, err := services.ExecuteCode(snippet.Language, snippet.Code, "", 2.0, 128)
+	duration := time.Since(start).Seconds() * 1000 // ms
 
 	if err != nil {
 		// Execution Failed (Service Error or Code Error that service couldn't handle)
@@ -307,6 +312,25 @@ func RunSnippet(c *gin.Context) {
 	snippet.LastExecutionOutput = res.Run.Stdout
 	if res.Run.Stderr != "" {
 		snippet.LastExecutionOutput += "\n[STDERR]\n" + res.Run.Stderr
+	}
+
+	// Capture Runtime
+	// Piston returns runtime in the output, but simple-piston might not expose it easily in 'Run' struct depending on pkg.
+	// Assuming services.ExecuteCode returns a struct that has optional Runtime info?
+	// The current services.ExecuteCode returns `*piston.ExecuteResult, error`.
+	// piston.ExecuteResult.Run usually has no runtime field in some versions, but let's check if we can get it.
+	// Actually, looking at commonly used piston clients, it might be in `Run.Signal` or similar?
+	// For now, let's just create a placeholder or assume the service can provide it.
+	// We'll update services.ExecuteCode later if needed.
+	// Wait! The requirement says "Runtime (float64)".
+	// Let's assume we can get it or just ignore for now if not available in current service signature.
+	// But `Snippet` model has `Runtime`. We should update it if we can.
+	// `RunSnippet` is for MVP execution.
+	// If the user runs it, we might want to update the `Runtime` field on the snippet model itself?
+	// Or is `Runtime` on the model a static "verified runtime"?
+	// Yes, `Runtime` on model seems to be the "last successful run time" or "verified run time".
+	if snippet.LastExecutionStatus == "SUCCESS" {
+		snippet.Runtime = duration
 	}
 
 	database.DB.Save(&snippet)

@@ -41,6 +41,10 @@ type User struct {
 	Role       Role       `gorm:"type:text;default:'USER'" json:"role"`
 	Visibility Visibility `gorm:"type:text;default:'PUBLIC'" json:"visibility"`
 
+	OnboardingCompleted bool    `gorm:"default:false" json:"onboardingCompleted"`
+	PreferredLanguages  *string `gorm:"type:text[]" json:"preferredLanguages"` // Postgres Array
+	Interests           *string `gorm:"type:text[]" json:"interests"`          // Postgres Array
+
 	// Anti-Cheat (MVP)
 	TrustScore int `gorm:"default:100" json:"trustScore"`
 
@@ -51,6 +55,10 @@ type User struct {
 	// MVP v1.1: Profile Customization
 	PinnedSnippetID *string  `gorm:"column:pinnedSnippetId" json:"pinnedSnippetId"`
 	PinnedSnippet   *Snippet `gorm:"foreignKey:PinnedSnippetID" json:"pinnedSnippet,omitempty"`
+
+	// Identity Management
+	UsernameChangeCount  int       `gorm:"default:0" json:"usernameChangeCount"`
+	LastUsernameChangeAt time.Time `json:"lastUsernameChangeAt"`
 
 	ResetToken       string    `json:"-"`
 	ResetTokenExpiry time.Time `json:"-"`
