@@ -130,6 +130,8 @@ func checkReactionsForMessages(userID string, messages []models.FeedbackMessage)
 	if len(messages) == 0 {
 		return
 	}
+
+	// Check upvote reactions
 	var reactionIDs []string
 	database.DB.Model(&models.FeedbackReaction{}).
 		Where("user_id = ?", userID).
@@ -140,12 +142,20 @@ func checkReactionsForMessages(userID string, messages []models.FeedbackMessage)
 		reactionMap[id] = true
 	}
 
+	// Check disagrees/downvotes
+	var disagreeIDs []string
+	database.DB.Model(&models.FeedbackDisagree{}).
+		Where("user_id = ?", userID).
+		Pluck("message_id", &disagreeIDs)
+
+	disagreeMap := make(map[string]bool)
+	for _, id := range disagreeIDs {
+		disagreeMap[id] = true
+	}
+
 	for i := range messages {
-		if reactionMap[messages[i].ID] {
-			messages[i].HasReacted = true
-		} else {
-			messages[i].HasReacted = false // Reset in case it came from dirty cache
-		}
+		messages[i].HasReacted = reactionMap[messages[i].ID]
+		messages[i].HasDisagreed = disagreeMap[messages[i].ID]
 	}
 }
 
@@ -188,6 +198,56 @@ func ReactFeedback(c *gin.Context) {
 			return
 		}
 		if err := tx.Model(&models.FeedbackMessage{}).Where("id = ?", messageID).UpdateColumn("upvotes", gorm.Expr("upvotes - ?", 1)).Error; err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update count"})
+			return
+		}
+		tx.Commit()
+		c.JSON(http.StatusOK, gin.H{"status": "removed"})
+	}
+
+	go database.CacheInvalidate("feedback:*")
+}
+
+// DisagreeFeedback handles toggling disagree/downvote reactions
+func DisagreeFeedback(c *gin.Context) {
+	userID := c.GetString("userId")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	messageID := c.Param("id")
+
+	var disagree models.FeedbackDisagree
+	result := database.DB.Where("user_id = ? AND message_id = ?", userID, messageID).First(&disagree)
+
+	tx := database.DB.Begin()
+
+	if result.Error == gorm.ErrRecordNotFound {
+		// Add Disagree
+		newDisagree := models.FeedbackDisagree{UserID: userID, MessageID: messageID}
+		if err := tx.Create(&newDisagree).Error; err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to disagree"})
+			return
+		}
+		if err := tx.Model(&models.FeedbackMessage{}).Where("id = ?", messageID).UpdateColumn("downvotes", gorm.Expr("downvotes + ?", 1)).Error; err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update count"})
+			return
+		}
+		tx.Commit()
+		c.JSON(http.StatusOK, gin.H{"status": "added"})
+
+	} else {
+		// Remove Disagree
+		if err := tx.Delete(&disagree).Error; err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to remove disagree"})
+			return
+		}
+		if err := tx.Model(&models.FeedbackMessage{}).Where("id = ?", messageID).UpdateColumn("downvotes", gorm.Expr("downvotes - ?", 1)).Error; err != nil {
 			tx.Rollback()
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update count"})
 			return

@@ -18,5 +18,6 @@ func RegisterFeedbackRoutes(r *gin.RouterGroup) {
 	{
 		protected.POST("", handlers.CreateFeedback)
 		protected.POST("/:id/react", handlers.ReactFeedback)
+		protected.POST("/:id/disagree", handlers.DisagreeFeedback)
 	}
 }

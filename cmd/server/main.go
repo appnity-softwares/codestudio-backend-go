@@ -51,6 +51,7 @@ func main() {
 		&models.EntityCopy{},
 		&models.FeedbackMessage{},
 		&models.FeedbackReaction{},
+		&models.FeedbackDisagree{},
 	}
 
 	for _, m := range tableModels {
