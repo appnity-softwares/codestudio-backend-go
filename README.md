@@ -1,2 +1,2 @@
 # codestudio-backend-go
-# codestudio-backend-g
+# codestudio-backend-gb
