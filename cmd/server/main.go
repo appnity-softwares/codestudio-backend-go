@@ -119,6 +119,7 @@ func main() {
 
 		// Public system status (for maintenance page)
 		api.GET("/system/status", handlers.PublicGetSystemStatus)
+		api.GET("/landing/stats", handlers.PublicGetLandingStats)
 
 		// Protected routes - apply maintenance mode check
 		protected := api.Group("")

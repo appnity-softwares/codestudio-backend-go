@@ -896,6 +896,38 @@ func PublicGetSystemStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"settings": settingsMap})
 }
 
+// PublicGetLandingStats returns real platform stats for the landing page
+func PublicGetLandingStats(c *gin.Context) {
+	var stats struct {
+		TotalUsers       int64          `json:"totalUsers"`
+		TotalSubmissions int64          `json:"totalSubmissions"`
+		TotalSnippets    int64          `json:"totalSnippets"`
+		TotalContests    int64          `json:"totalContests"`
+		UpcomingEvents   []models.Event `json:"upcomingEvents"`
+		TopContestants   []models.User  `json:"topContestants"`
+	}
+
+	// 1. Basic Counts
+	database.DB.Model(&models.User{}).Count(&stats.TotalUsers)
+	database.DB.Model(&models.Submission{}).Count(&stats.TotalSubmissions)
+	database.DB.Model(&models.Snippet{}).Count(&stats.TotalSnippets)
+	database.DB.Model(&models.Event{}).Count(&stats.TotalContests)
+
+	// 2. Upcoming Events (Next 3)
+	database.DB.Where("status = ? AND start_time > ?", models.EventStatusUpcoming, time.Now()).
+		Order("start_time asc").
+		Limit(3).
+		Find(&stats.UpcomingEvents)
+
+	// 3. Top Contestants (by trust score or snippet count for now)
+	database.DB.Where("onboarding_completed = ?", true).
+		Order("trust_score desc, snippet_count desc").
+		Limit(3).
+		Find(&stats.TopContestants)
+
+	c.JSON(http.StatusOK, stats)
+}
+
 // AdminTriggerRedeploy executes the redeployment script on the server
 func AdminTriggerRedeploy(c *gin.Context) {
 	adminID := getAdminID(c)
