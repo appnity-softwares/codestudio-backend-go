@@ -26,6 +26,7 @@ type PistonExecuteRequest struct {
 }
 
 type File struct {
+	Name    string `json:"name,omitempty"`
 	Content string `json:"content"`
 }
 
@@ -75,11 +76,53 @@ func getCacheKey(language, code, stdin string) string {
 	return hex.EncodeToString(hash[:])
 }
 
+// normalizePistonLanguage converts frontend language names to Piston-compatible names
+func normalizePistonLanguage(lang string) string {
+	// Map of frontend language names to Piston language names
+	langMap := map[string]string{
+		"typescript": "typescript",
+		"javascript": "javascript",
+		"python":     "python",
+		"go":         "go",
+		"cpp":        "c++",
+		"c++":        "c++",
+		"java":       "java",
+		"rust":       "rust",
+		"c":          "c",
+	}
+
+	if pistonLang, ok := langMap[lang]; ok {
+		return pistonLang
+	}
+	// Return as-is if not in map
+	return lang
+}
+
+// getFileExtension returns the appropriate file extension for a language
+func getFileExtension(lang string) string {
+	extMap := map[string]string{
+		"typescript": "index.ts",
+		"javascript": "index.js",
+		"python":     "main.py",
+		"go":         "main.go",
+		"c++":        "main.cpp",
+		"cpp":        "main.cpp",
+		"java":       "Main.java",
+		"rust":       "main.rs",
+		"c":          "main.c",
+	}
+
+	if ext, ok := extMap[lang]; ok {
+		return ext
+	}
+	return "code.txt"
+}
+
 // ExecuteCode runs code via Piston with optional constraints
 func ExecuteCode(language, code, stdin string, timeLimit float64, memoryLimit int) (*PistonExecuteResponse, error) {
-	// 1. Bypass for Web Languages (HTML, React)
+	// 1. Bypass for Web/Visual Languages
 	// These are rendered on the client, but we mock a "success" execution for correctness/storage.
-	if language == "html" || language == "react" {
+	if language == "html" || language == "react" || language == "markdown" || language == "mermaid" {
 		return &PistonExecuteResponse{
 			Language: language,
 			Version:  "web-n/a",
@@ -123,7 +166,7 @@ func ExecuteCode(language, code, stdin string, timeLimit float64, memoryLimit in
 
 	// Convert limits
 	// timeLimit is seconds (float). Piston wants ms (int).
-	runTimeout := 3000 // Default 3s
+	runTimeout := 5000 // Default 5s
 	if timeLimit > 0 {
 		runTimeout = int(timeLimit * 1000)
 	}
@@ -136,14 +179,18 @@ func ExecuteCode(language, code, stdin string, timeLimit float64, memoryLimit in
 	if runMemory > 0 && runMemory < 10000 {
 		runMemory = runMemory * 1024 * 1024 // Convert MB to Bytes
 	} else if runMemory == 0 {
-		runMemory = 128 * 1024 * 1024 // Default 128MB
+		runMemory = 512 * 1024 * 1024 // Default 512MB (increased from 128MB to avoid OOM)
 	}
 
+	// Normalize language name for Piston API
+	pistonLang := normalizePistonLanguage(language)
+	fileName := getFileExtension(language)
+
 	reqBody := PistonExecuteRequest{
-		Language: language,
+		Language: pistonLang,
 		Version:  version,
 		Files: []File{
-			{Content: code},
+			{Name: fileName, Content: code},
 		},
 		Stdin:          stdin,
 		RunTimeout:     runTimeout,
