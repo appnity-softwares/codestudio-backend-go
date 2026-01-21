@@ -302,11 +302,35 @@ func SubmitPracticeSolution(c *gin.Context) {
 
 	database.DB.Save(&submission)
 
+	// Findings Next Problem (if Accepted)
+	var nextProblemID string
+	if submission.Status == "ACCEPTED" {
+		// Get all solved IDs
+		var solvedIDs []string
+		database.DB.Model(&models.PracticeSubmission{}).
+			Where("\"userId\" = ? AND status = ?", uid, "ACCEPTED").
+			Distinct("\"problemId\"").
+			Pluck("\"problemId\"", &solvedIDs)
+
+		// Find first unsolved problem (ordered by difficulty/daily)
+		var nextProblem models.PracticeProblem
+		query := database.DB.Model(&models.PracticeProblem{})
+		if len(solvedIDs) > 0 {
+			query = query.Where("id NOT IN ?", solvedIDs)
+		}
+		// Simple heuristic: Next easiest, or random if all easy done
+		// For now, just generic order
+		if err := query.Order("difficulty ASC, solve_count DESC").First(&nextProblem).Error; err == nil {
+			nextProblemID = nextProblem.ID
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"submission": submission,
-		"output":     res.Run.Stdout,
-		"stderr":     res.Run.Stderr,
-		"newBadges":  newBadges, // Send badges to frontend for celebration
+		"submission":    submission,
+		"output":        res.Run.Stdout,
+		"stderr":        res.Run.Stderr,
+		"newBadges":     newBadges,
+		"nextProblemId": nextProblemID,
 	})
 }
 

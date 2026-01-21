@@ -24,12 +24,19 @@ func RegisterAdminRoutes(rg *gin.RouterGroup) {
 	admin.POST("/contests/:id/end", handlers.AdminEndContest)
 	admin.GET("/contests/:id/participants", handlers.AdminGetContestParticipants)
 
-	// Problem Management
+	// Problem Management (Contests)
 	admin.GET("/problems/:id", handlers.AdminGetProblem)
 	admin.POST("/problems", handlers.AdminCreateProblem)
 	admin.PUT("/problems/:id", handlers.AdminUpdateProblem)
 	admin.DELETE("/problems/:id", handlers.AdminDeleteProblem)
 	admin.POST("/problems/reorder", handlers.AdminReorderProblems)
+
+	// Practice Problem Management
+	admin.GET("/practice-problems", handlers.AdminListPracticeProblems)
+	admin.GET("/practice-problems/:id", handlers.AdminGetPracticeProblem)
+	admin.POST("/practice-problems", handlers.AdminCreatePracticeProblem)
+	admin.PUT("/practice-problems/:id", handlers.AdminUpdatePracticeProblem)
+	admin.DELETE("/practice-problems/:id", handlers.AdminDeletePracticeProblem)
 
 	// Test Case Management
 	admin.POST("/problems/:id/testcases", handlers.AdminCreateTestCase)

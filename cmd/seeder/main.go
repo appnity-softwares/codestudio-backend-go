@@ -13,11 +13,11 @@ func main() {
 	config.LoadConfig()
 	database.Connect()
 
-	log.Println("🔄 Running migrations (Stage 1: Tables)...")
-	// Temporarily disable foreign key constraints to break circular dependency (User <-> Snippet)
-	database.DB.Config.DisableForeignKeyConstraintWhenMigrating = true
+	log.Println("🚀 Starting Production Data Seeding (Additive & Safe)...")
 
-	migrationModels := []interface{}{
+	// 1. Ensure Migrations (Structure)
+	log.Println("🔄 Verifying Schema...")
+	database.DB.AutoMigrate(
 		&models.User{},
 		&models.Event{},
 		&models.Snippet{},
@@ -35,48 +35,26 @@ func main() {
 		&models.SubmissionFlag{},
 		&models.SubmissionMetrics{},
 		&models.TestCase{},
-	}
+		&models.FeedbackMessage{},
+		&models.FeedbackReaction{},
+		&models.FeedbackDisagree{},
+		&models.Badge{},
+		&models.UserBadge{},
+	)
 
-	for _, m := range migrationModels {
-		if err := database.DB.AutoMigrate(m); err != nil {
-			log.Fatalf("❌ Failed to migrate table for %T: %v", m, err)
-		}
-	}
-
-	log.Println("🔄 Running migrations (Stage 2: Constraints)...")
-	// Re-enable and add all foreign key constraints via ALTER TABLE
-	database.DB.Config.DisableForeignKeyConstraintWhenMigrating = false
-	if err := database.DB.AutoMigrate(migrationModels...); err != nil {
-		log.Fatalf("❌ Failed to add constraints: %v", err)
-	}
-
-	log.Println("🗑️  Clearing Tables (EXCEPT Users)...")
-	// Note: We use CASCADE to clean up related data
-	// We do NOT truncate "User" table to preserve admin accounts.
-	tablesToTruncate := []string{
-		"\"Snippet\"", "events", "problems", "submissions",
-		"registrations", "changelog_entries",
-		"practice_problems", "practice_submissions",
-		"submission_flags", "submission_metrics", "test_cases",
-	}
-
-	for _, table := range tablesToTruncate {
-		if err := database.DB.Exec("TRUNCATE TABLE \"" + table + "\" RESTART IDENTITY CASCADE").Error; err != nil {
-			log.Printf("⚠️ Warning: Failed to truncate %s: %v", table, err)
-		}
-	}
-
-	// 👤 SEED USERS (and get admin for ownership)
-	admin, err := seeds.SeedUsers()
+	// 2. SYSTEM USER (The owner of all official content)
+	systemUser, err := seeds.GetOrCreateSystemUser()
 	if err != nil {
-		log.Fatalf("❌ Failed to seed users: %v", err)
+		log.Fatalf("❌ Failed to get/create system user: %v", err)
 	}
 
-	// 🌱 RUN MODULAR SEEDERS
-	seeds.SeedEvents(admin)
-	seeds.SeedPracticeProblems(admin)
-	seeds.SeedSnippets(admin)
+	// 3. SEED CONTENT
+	seeds.SeedOfficialSnippets(systemUser)
+	seeds.SeedPracticeProblems(systemUser)
+	seeds.SeedOfficialContests(systemUser)
+	seeds.SeedFeedback(systemUser)
+	seeds.SeedBadges()
 	seeds.SeedChangelog()
 
-	log.Println("✅ Database Reset & Seeding Complete!")
+	log.Println("✅ Production Seeding Completed Successfully!")
 }

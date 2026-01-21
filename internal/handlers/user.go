@@ -78,7 +78,7 @@ func GetProfileSummary(c *gin.Context) {
 	// 2. Count PUBLISHED Snippets & Aggregate by Language
 	var totalSnippets int64
 	database.DB.Model(&models.Snippet{}).
-		Where("author_id = ? AND status = ?", user.ID, "PUBLISHED").
+		Where("(author_id = ? OR \"authorId\" = ?) AND status = ?", user.ID, user.ID, "PUBLISHED").
 		Count(&totalSnippets)
 
 	// Group by Language
@@ -89,7 +89,7 @@ func GetProfileSummary(c *gin.Context) {
 	var langResults []LangResult
 	database.DB.Model(&models.Snippet{}).
 		Select("language, count(*) as count").
-		Where("author_id = ? AND status = ?", user.ID, "PUBLISHED").
+		Where("(author_id = ? OR \"authorId\" = ?) AND status = ?", user.ID, user.ID, "PUBLISHED").
 		Group("language").
 		Scan(&langResults)
 
@@ -329,7 +329,8 @@ func UpdateProfile(c *gin.Context) {
 
 	// Populate Counts for response
 	var snippetCount int64
-	database.DB.Model(&models.Snippet{}).Where(&models.Snippet{AuthorID: user.ID}).Count(&snippetCount)
+	// Use explicit query to avoid GORM struct zero-value pitfalls
+	database.DB.Model(&models.Snippet{}).Where("author_id = ?", user.ID).Count(&snippetCount)
 	user.Count.Snippets = snippetCount
 
 	c.JSON(http.StatusOK, gin.H{"user": user})
@@ -363,14 +364,14 @@ func GetPublicProfile(c *gin.Context) {
 	// We'll trust cached columns if updated, but update them on reads occasionally?
 	// For MVP, let's just do count queries, Postgres handles them fast enough for <100k users.
 	var snippetCount int64
-	database.DB.Model(&models.Snippet{}).Where("author_id = ? AND status = 'PUBLISHED'", user.ID).Count(&snippetCount)
+	database.DB.Model(&models.Snippet{}).Where("(author_id = ? OR \"authorId\" = ?) AND status = 'PUBLISHED'", user.ID, user.ID).Count(&snippetCount)
 
 	var contestCount int64
 	database.DB.Model(&models.Registration{}).Where("user_id = ?", user.ID).Count(&contestCount)
 
 	// Fetch Top 3 Snippets by Views
 	var topSnippets []models.Snippet
-	database.DB.Where("author_id = ? AND status = 'PUBLISHED'", user.ID).
+	database.DB.Where("(author_id = ? OR \"authorId\" = ?) AND status = 'PUBLISHED'", user.ID, user.ID).
 		Order("view_count desc").Limit(3).Find(&topSnippets)
 
 	// Sanitize Response
@@ -444,24 +445,25 @@ func ListCommunityUsers(c *gin.Context) {
 	}
 
 	// Sanitize List
+	// Sanitize List & Populate Real Counts
 	var safeUsers []gin.H
 	for _, u := range users {
+		var snippetCount int64
+		database.DB.Model(&models.Snippet{}).Where("(author_id = ? OR \"authorId\" = ?) AND status = 'PUBLISHED'", u.ID, u.ID).Count(&snippetCount)
+
+		var contestCount int64
+		database.DB.Model(&models.Registration{}).Where("user_id = ?", u.ID).Count(&contestCount)
+
 		safeUsers = append(safeUsers, gin.H{
-			"id":         u.ID,
-			"username":   u.Username,
-			"name":       u.Name,
-			"image":      u.Image,
-			"bio":        u.Bio,
-			"trustScore": u.TrustScore,
-			"createdAt":  u.CreatedAt,
-			// For list view, we might want counts. Avoiding N+1 queries by using the cached columns we added?
-			// We added WrappedSnippetCount etc. but logic to update them isn't there yet.
-			// Let's rely on client-side fetching or lazy loading if critical, OR just return raw values from User table
-			// since we added the columns `snippet_count` etc.
-			// Ideally we have a background job that updates these.
-			// For MVP, just return 0 or what's in DB.
-			"snippetCount": u.WrappedSnippetCount,
-			"contestCount": u.WrappedContestCount,
+			"id":           u.ID,
+			"username":     u.Username,
+			"name":         u.Name,
+			"image":        u.Image,
+			"bio":          u.Bio,
+			"trustScore":   u.TrustScore,
+			"createdAt":    u.CreatedAt,
+			"snippetCount": snippetCount,
+			"contestCount": contestCount,
 		})
 	}
 
@@ -486,20 +488,20 @@ func GetStats(c *gin.Context) {
 
 	// Count total snippets
 	var snippetCount int64
-	database.DB.Model(&models.Snippet{}).Where("\"authorId\" = ?", userId).Count(&snippetCount)
+	database.DB.Model(&models.Snippet{}).Where("(\"authorId\" = ? OR author_id = ?)", userId, userId).Count(&snippetCount)
 
 	// v1.2: Count total forks received on user's snippets
 	var totalForksReceived int64
 	database.DB.Model(&models.Snippet{}).
 		Select("COALESCE(SUM(fork_count), 0)").
-		Where("\"authorId\" = ?", userId).
+		Where("(\"authorId\" = ? OR author_id = ?)", userId, userId).
 		Scan(&totalForksReceived)
 
 	// v1.2: Count total copies received
 	var totalCopiesReceived int64
 	database.DB.Model(&models.Snippet{}).
 		Select("COALESCE(SUM(copy_count), 0)").
-		Where("\"authorId\" = ?", userId).
+		Where("(\"authorId\" = ? OR author_id = ?)", userId, userId).
 		Scan(&totalCopiesReceived)
 
 	// v1.2: Count contest solves (successful submissions)
@@ -564,7 +566,7 @@ func GetUserSnippets(c *gin.Context) {
 	userId := c.Param("username")
 
 	snippets := []models.Snippet{}
-	if err := database.DB.Where("\"authorId\" = ?", userId).Preload("Author").Find(&snippets).Error; err != nil {
+	if err := database.DB.Where("\"authorId\" = ? OR author_id = ?", userId, userId).Preload("Author").Find(&snippets).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch snippets"})
 		return
 	}
@@ -582,13 +584,98 @@ func GetBadges(c *gin.Context) {
 		return
 	}
 
+	// 1. Fetch All System Badges
+	var allBadges []models.Badge
+	database.DB.Order("threshold asc").Find(&allBadges)
+
+	// 2. Fetch User's Unlocked/Progress Badges
 	var userBadges []models.UserBadge
-	// Preload the Badge definition
-	if err := database.DB.Preload("Badge").Where("user_id = ?", user.ID).Find(&userBadges).Error; err != nil {
-		fmt.Printf("Error fetching badges for user %s: %v\n", user.ID, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to fetch badges: %v", err)})
-		return
+	database.DB.Where("user_id = ?", user.ID).Find(&userBadges)
+
+	// Map wrapper for easier lookup
+	userBadgeMap := make(map[string]models.UserBadge)
+	for _, ub := range userBadges {
+		userBadgeMap[ub.BadgeID] = ub
 	}
 
-	c.JSON(http.StatusOK, gin.H{"badges": userBadges})
+	// 3. Construct Response & Calculate Influence
+	type BadgeResponse struct {
+		models.Badge
+		Unlocked   bool      `json:"unlocked"`
+		Progress   int       `json:"progress"`
+		UnlockedAt time.Time `json:"unlockedAt,omitempty"`
+	}
+
+	var responseBadges []BadgeResponse
+	unlockedCount := 0
+
+	for _, badge := range allBadges {
+		ub, exists := userBadgeMap[badge.ID]
+		if exists && ub.Progress >= badge.Threshold {
+			unlockedCount++
+			responseBadges = append(responseBadges, BadgeResponse{
+				Badge:      badge,
+				Unlocked:   true,
+				Progress:   ub.Progress,
+				UnlockedAt: ub.UnlockedAt,
+			})
+		} else {
+			// Locked or In Progress
+			progress := 0
+			if exists {
+				progress = ub.Progress
+			}
+			responseBadges = append(responseBadges, BadgeResponse{
+				Badge:    badge,
+				Unlocked: false,
+				Progress: progress,
+			})
+		}
+	}
+
+	// 4. Calculate Influence Score
+	// Base: Trust Score
+	influence := int64(user.TrustScore)
+
+	// Bonus: Snippets * 10
+	var snippetCount int64
+	database.DB.Model(&models.Snippet{}).Where("(author_id = ? OR \"authorId\" = ?) AND status = 'PUBLISHED'", user.ID, user.ID).Count(&snippetCount)
+	influence += snippetCount * 10
+
+	// Bonus: Badges * 50
+	influence += int64(unlockedCount * 50)
+
+	// Bonus: Contests
+	var contestCount int64
+	database.DB.Model(&models.Registration{}).Where("user_id = ? AND status != 'BANNED'", user.ID).Count(&contestCount)
+	influence += contestCount * 25
+
+	// ADMIN OVERRIDE: Supreme Influence
+	rank := "Novice"
+	if user.Role == models.RoleAdmin {
+		influence = 1000000
+		rank = "Supreme Architect"
+	} else {
+		if influence > 500 {
+			rank = "Expert"
+		} else if influence > 200 {
+			rank = "Contributor"
+		} else if influence > 100 {
+			rank = "Apprentice"
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"badges": responseBadges,
+		"influence": gin.H{
+			"score": influence,
+			"rank":  rank,
+			"breakdown": gin.H{
+				"trust":    user.TrustScore,
+				"snippets": snippetCount * 10,
+				"badges":   unlockedCount * 50,
+				"contests": contestCount * 25,
+			},
+		},
+	})
 }

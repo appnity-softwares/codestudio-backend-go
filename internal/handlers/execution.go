@@ -10,6 +10,7 @@ import (
 type ExecuteRequest struct {
 	Language string `json:"language" binding:"required"`
 	Code     string `json:"code" binding:"required"`
+	Stdin    string `json:"stdin"`
 }
 
 func ExecuteCode(c *gin.Context) {
@@ -20,7 +21,7 @@ func ExecuteCode(c *gin.Context) {
 	}
 
 	// Default limits for generic execution (or read from req if needed)
-	result, err := services.ExecuteCode(req.Language, req.Code, "", 0, 0)
+	result, err := services.ExecuteCode(req.Language, req.Code, req.Stdin, 0, 0)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Execution failed: " + err.Error()})
 		return

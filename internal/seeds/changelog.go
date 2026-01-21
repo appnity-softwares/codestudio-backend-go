@@ -11,31 +11,36 @@ import (
 
 func SeedChangelog() {
 	log.Println("📢 Seeding Changelog...")
-	entries := []models.ChangelogEntry{
-		{
-			ID:        uuid.New().String(),
-			Version:   "1.0.0-MVP",
-			Title:     "Initial Launch",
-			Changes:   []string{"Snippet sharing & execution", "Arena contests", "Socket.io presence", "Basic profile metrics"},
-			CreatedAt: time.Now().Add(-72 * time.Hour),
-		},
-		{
-			ID:        uuid.New().String(),
-			Version:   "1.1.0",
-			Title:     "Rich Snippets",
-			Changes:   []string{"Snippet types & difficulty", "Enhanced code previews", "Output snapshots"},
-			CreatedAt: time.Now().Add(-48 * time.Hour),
-		},
-		{
-			ID:        uuid.New().String(),
-			Version:   "1.2.0",
-			Title:     "Smart Feed & Progress",
-			Changes:   []string{"Smart Feed (Trending/New/Editor)", "Fork & Copy snippets", "User progress stats", "Trust score & ranking", "Admin snippet pinning"},
-			CreatedAt: time.Now(),
-		},
+
+	now := time.Now()
+	entry := models.ChangelogEntry{
+		Version: "v1.0",
+		Title:   "CodeStudio Initial Launch",
+		Description: `We are excited to launch CodeStudio! 🚀
+
+**New Features:**
+- **Code Snippets:** Share and discover useful code fragments.
+- **Practice Arena:** Sharpen your skills with algorithmic problems.
+- **Contests:** Compete in official events.
+- **Community:** Public profiles and feedback wall.
+
+Enjoy coding!`,
+		ReleaseType: "FEATURE", // Using FEATURE as a general type for launch
+		IsPublished: true,
+		ReleasedAt:  &now,
+		CreatedAt:   now,
 	}
 
-	for _, e := range entries {
-		database.DB.Create(&e)
+	var existing models.ChangelogEntry
+	if err := database.DB.Where("version = ?", entry.Version).First(&existing).Error; err == nil {
+		log.Printf("   ℹ️ Changelog %s already exists", entry.Version)
+		return
+	}
+
+	entry.ID = uuid.New().String()
+	if err := database.DB.Create(&entry).Error; err != nil {
+		log.Printf("   ❌ Failed to seed changelog: %v", err)
+	} else {
+		log.Printf("   📢 Changelog Published: %s", entry.Version)
 	}
 }
