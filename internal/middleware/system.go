@@ -26,6 +26,12 @@ func MaintenanceMode() gin.HandlerFunc {
 			return
 		}
 
+		// Always allow profile check so frontend can determine if user is admin
+		if c.Request.URL.Path == "/api/users/profile" {
+			c.Next()
+			return
+		}
+
 		// Allow admin users to pass through
 		userID, exists := c.Get("userId")
 		if exists {
@@ -42,6 +48,7 @@ func MaintenanceMode() gin.HandlerFunc {
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"error":   "Maintenance in progress",
 			"message": "The platform is currently under maintenance. Please try again later.",
+			"eta":     getSystemSetting(models.SettingMaintenanceETA),
 		})
 		c.Abort()
 	}

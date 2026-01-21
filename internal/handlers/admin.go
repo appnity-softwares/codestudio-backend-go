@@ -668,6 +668,7 @@ func AdminUpdateSystemSettings(c *gin.Context) {
 		models.SettingSnippetsEnabled:    true,
 		models.SettingContestsEnabled:    true,
 		models.SettingRegistrationOpen:   true,
+		models.SettingMaintenanceETA:     true,
 	}
 	if !validKeys[req.Key] {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid setting key"})
@@ -691,4 +692,20 @@ func AdminUpdateSystemSettings(c *gin.Context) {
 	logAdminAction(database.DB, adminID, models.ActionAdjustTrust, req.Key, "system", "Changed to: "+req.Value)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Setting updated", "setting": setting})
+}
+
+// PublicGetSystemStatus returns non-sensitive system info for maintenance pages
+func PublicGetSystemStatus(c *gin.Context) {
+	var settings []models.SystemSettings
+	database.DB.Where("key IN ?", []string{
+		models.SettingMaintenanceMode,
+		models.SettingMaintenanceETA,
+	}).Find(&settings)
+
+	settingsMap := make(map[string]string)
+	for _, s := range settings {
+		settingsMap[s.Key] = s.Value
+	}
+
+	c.JSON(http.StatusOK, gin.H{"settings": settingsMap})
 }

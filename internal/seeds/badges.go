@@ -15,10 +15,26 @@ func SeedBadges() {
 		{
 			Name:        "First Snippet",
 			Description: "Created your first code snippet.",
-			Icon:        "code", // Lucide icon name
+			Icon:        "code",
 			Category:    models.BadgeCategorySkill,
 			Condition:   "1_snippet",
 			Threshold:   1,
+		},
+		{
+			Name:        "Snippet Enthusiast",
+			Description: "Published 5 code snippets to the feed.",
+			Icon:        "terminal",
+			Category:    models.BadgeCategorySkill,
+			Condition:   "5_snippets",
+			Threshold:   5,
+		},
+		{
+			Name:        "Snippet Master",
+			Description: "Published 25 snippets. A true code architect.",
+			Icon:        "crown",
+			Category:    models.BadgeCategorySkill,
+			Condition:   "25_snippets",
+			Threshold:   25,
 		},
 		{
 			Name:        "Problem Solver",
@@ -29,6 +45,22 @@ func SeedBadges() {
 			Threshold:   1,
 		},
 		{
+			Name:        "Apprentice Solver",
+			Description: "Solved 5 practice problems.",
+			Icon:        "zap",
+			Category:    models.BadgeCategorySkill,
+			Condition:   "5_practice_solved",
+			Threshold:   5,
+		},
+		{
+			Name:        "Algorithm Architect",
+			Description: "Solved 25 practice problems.",
+			Icon:        "shield-check",
+			Category:    models.BadgeCategorySkill,
+			Condition:   "25_practice_solved",
+			Threshold:   25,
+		},
+		{
 			Name:        "Contest Participant",
 			Description: "Participated in an official contest.",
 			Icon:        "trophy",
@@ -37,12 +69,20 @@ func SeedBadges() {
 			Threshold:   1,
 		},
 		{
+			Name:        "Arena Veteran",
+			Description: "Competed in 5 official Arena events.",
+			Icon:        "sword",
+			Category:    models.BadgeCategorySkill,
+			Condition:   "5_contests",
+			Threshold:   5,
+		},
+		{
 			Name:        "Early Adopter",
 			Description: "Joined during the initial launch phase.",
 			Icon:        "star",
 			Category:    models.BadgeCategoryTrust,
 			Condition:   "early_adopter",
-			Threshold:   0,
+			Threshold:   1,
 		},
 		{
 			Name:        "Feedback Contributor",
@@ -51,6 +91,14 @@ func SeedBadges() {
 			Category:    models.BadgeCategoryTrust,
 			Condition:   "feedback_given",
 			Threshold:   1,
+		},
+		{
+			Name:        "Community Pillar",
+			Description: "Provided 5 pieces of constructive feedback.",
+			Icon:        "heart",
+			Category:    models.BadgeCategoryTrust,
+			Condition:   "5_feedback",
+			Threshold:   5,
 		},
 	}
 

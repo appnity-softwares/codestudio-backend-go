@@ -58,6 +58,7 @@ const (
 	SettingSnippetsEnabled    = "snippets_enabled"
 	SettingContestsEnabled    = "contests_enabled"
 	SettingRegistrationOpen   = "registration_open"
+	SettingMaintenanceETA     = "maintenance_eta"
 )
 
 // AdminAuditLog extends AdminAction with IP tracking (used for detailed audit)

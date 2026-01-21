@@ -141,7 +141,13 @@ func CreateSnippet(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, snippet)
+	// Check for Badges
+	newBadges, _ := services.CheckBadges(userID.(string))
+
+	c.JSON(http.StatusCreated, gin.H{
+		"snippet":   snippet,
+		"newBadges": newBadges,
+	})
 }
 
 // GetSnippet handles GET /snippets/:id
@@ -158,7 +164,7 @@ func GetSnippet(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, snippet)
+	c.JSON(http.StatusOK, gin.H{"snippet": snippet})
 }
 
 // UpdateSnippet handles PUT /snippets/:id
@@ -210,7 +216,7 @@ func UpdateSnippet(c *gin.Context) {
 
 	database.DB.Save(&snippet)
 
-	c.JSON(http.StatusOK, snippet)
+	c.JSON(http.StatusOK, gin.H{"snippet": snippet})
 }
 
 // DeleteSnippet handles DELETE /snippets/:id

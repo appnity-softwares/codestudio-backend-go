@@ -57,7 +57,7 @@ func AdminCreateContest(c *gin.Context) {
 	event := models.Event{
 		ID:               uuid.New().String(),
 		Title:            req.Title,
-		Slug:             utils.GenerateSlug(req.Title),
+		Slug:             utils.GenerateSlug(req.Title) + "-" + uuid.New().String()[:8],
 		Description:      req.Description,
 		StartTime:        req.StartTime,
 		EndTime:          req.EndTime,
@@ -87,7 +87,7 @@ func AdminCreateContest(c *gin.Context) {
 	}
 
 	if err := database.DB.Create(&event).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create contest"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create contest: " + err.Error()})
 		return
 	}
 

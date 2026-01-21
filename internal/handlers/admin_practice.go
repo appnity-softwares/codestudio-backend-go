@@ -15,9 +15,10 @@ import (
 
 // AdminListPracticeProblems returns a list of all practice problems
 func AdminListPracticeProblems(c *gin.Context) {
-	var problems []models.PracticeProblem
-	if err := database.DB.Order("created_at desc").Find(&problems).Error; err != nil {
-		c.JSON(500, gin.H{"error": "Failed to fetch problems"})
+	problems := []models.PracticeProblem{}
+	// Order by most recent first, using the exact column casing from DB
+	if err := database.DB.Order("\"createdAt\" desc").Find(&problems).Error; err != nil {
+		c.JSON(500, gin.H{"error": "Failed to fetch problems: " + err.Error()})
 		return
 	}
 	c.JSON(200, gin.H{"problems": problems})
@@ -70,7 +71,7 @@ func AdminCreatePracticeProblem(c *gin.Context) {
 	}
 
 	if err := database.DB.Create(&problem).Error; err != nil {
-		c.JSON(500, gin.H{"error": "Failed to create practice problem"})
+		c.JSON(500, gin.H{"error": "Failed to create practice problem: " + err.Error()})
 		return
 	}
 

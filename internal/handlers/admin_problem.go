@@ -59,7 +59,7 @@ func AdminCreateProblem(c *gin.Context) {
 	}
 
 	if err := database.DB.Create(&problem).Error; err != nil {
-		c.JSON(500, gin.H{"error": "Failed to create problem"})
+		c.JSON(500, gin.H{"error": "Failed to create problem: " + err.Error()})
 		return
 	}
 

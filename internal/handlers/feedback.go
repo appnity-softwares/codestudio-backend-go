@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pushp314/devconnect-backend/internal/database"
 	"github.com/pushp314/devconnect-backend/internal/models"
+	"github.com/pushp314/devconnect-backend/internal/services"
 	"gorm.io/gorm"
 )
 
@@ -62,7 +63,13 @@ func CreateFeedback(c *gin.Context) {
 	// 4. Invalidate Cache (Latest feed)
 	go database.CacheInvalidate("feedback:latest*")
 
-	c.JSON(http.StatusCreated, feedback)
+	// 5. Check for Badges
+	newBadges, _ := services.CheckBadges(userID)
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message":   feedback,
+		"newBadges": newBadges,
+	})
 }
 
 // GetFeedback returns feedback list (paginated, sorted)

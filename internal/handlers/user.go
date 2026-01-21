@@ -598,11 +598,38 @@ func GetBadges(c *gin.Context) {
 		userBadgeMap[ub.BadgeID] = ub
 	}
 
-	// 3. Construct Response & Calculate Influence
+	// 3. Calculate Stats for Self-Healing & Influence
+	// Count ALL snippets (including drafts, so users see progress immediately)
+	var snippetCount int64
+	database.DB.Model(&models.Snippet{}).Where("(author_id = ? OR \"authorId\" = ?)", user.ID, user.ID).Count(&snippetCount)
+
+	// Count Contests
+	var contestCount int64
+	database.DB.Model(&models.Registration{}).Where("user_id = ? AND status != 'BANNED'", user.ID).Count(&contestCount)
+
+	// Count Practice Problems Solved
+	var practiceCount int64
+	database.DB.Model(&models.Submission{}).Where("user_id = ? AND status = 'ACCEPTED'", user.ID).Count(&practiceCount)
+
+	// Count Feedback Sent
+	var feedbackCount int64
+	database.DB.Model(&models.FeedbackMessage{}).Where("user_id = ?", user.ID).Count(&feedbackCount)
+
+	// Count Rank for Early Adopter (First 1000)
+	var userJoinRank int64
+	database.DB.Model(&models.User{}).
+		Where("created_at <= (SELECT created_at FROM users WHERE id = ?)", user.ID).
+		Count(&userJoinRank)
+	earlyAdopterProgress := int64(0)
+	if userJoinRank <= 1000 {
+		earlyAdopterProgress = 1
+	}
+
+	// 4. Construct Response & Self-Healing
 	type BadgeResponse struct {
 		models.Badge
 		Unlocked   bool      `json:"unlocked"`
-		Progress   int       `json:"progress"`
+		Progress   int64     `json:"progress"`
 		UnlockedAt time.Time `json:"unlockedAt,omitempty"`
 	}
 
@@ -611,43 +638,72 @@ func GetBadges(c *gin.Context) {
 
 	for _, badge := range allBadges {
 		ub, exists := userBadgeMap[badge.ID]
-		if exists && ub.Progress >= badge.Threshold {
+
+		var currentProgress int64 = 0
+		if exists {
+			currentProgress = int64(ub.Progress)
+		}
+
+		// Dynamic Progress Check
+		switch badge.Condition {
+		case "1_snippet", "5_snippets", "10_snippets", "25_snippets", "snippet_master":
+			currentProgress = snippetCount
+		case "1_contest", "5_contests":
+			currentProgress = contestCount
+		case "1_practice_solved", "5_practice_solved", "25_practice_solved":
+			currentProgress = practiceCount
+		case "feedback_given", "5_feedback":
+			currentProgress = feedbackCount
+		case "early_adopter":
+			currentProgress = earlyAdopterProgress
+		}
+
+		// Logic Override for "Early Adopter" (Threshold 0)
+		isUnlocked := exists && (badge.Threshold == 0 || ub.Progress >= badge.Threshold)
+
+		// Self-Healing
+		if !isUnlocked && badge.Threshold > 0 && currentProgress >= int64(badge.Threshold) {
+			newBadge := models.UserBadge{
+				UserID:     user.ID,
+				BadgeID:    badge.ID,
+				Progress:   int(currentProgress),
+				UnlockedAt: time.Now(),
+			}
+			if err := database.DB.Create(&newBadge).Error; err == nil {
+				isUnlocked = true
+				exists = true
+				ub = newBadge
+			}
+		}
+
+		if isUnlocked {
 			unlockedCount++
 			responseBadges = append(responseBadges, BadgeResponse{
 				Badge:      badge,
 				Unlocked:   true,
-				Progress:   ub.Progress,
+				Progress:   currentProgress,
 				UnlockedAt: ub.UnlockedAt,
 			})
 		} else {
-			// Locked or In Progress
-			progress := 0
-			if exists {
-				progress = ub.Progress
-			}
 			responseBadges = append(responseBadges, BadgeResponse{
 				Badge:    badge,
 				Unlocked: false,
-				Progress: progress,
+				Progress: currentProgress,
 			})
 		}
 	}
 
-	// 4. Calculate Influence Score
+	// 5. Calculate Influence Score
 	// Base: Trust Score
 	influence := int64(user.TrustScore)
 
 	// Bonus: Snippets * 10
-	var snippetCount int64
-	database.DB.Model(&models.Snippet{}).Where("(author_id = ? OR \"authorId\" = ?) AND status = 'PUBLISHED'", user.ID, user.ID).Count(&snippetCount)
 	influence += snippetCount * 10
 
 	// Bonus: Badges * 50
 	influence += int64(unlockedCount * 50)
 
 	// Bonus: Contests
-	var contestCount int64
-	database.DB.Model(&models.Registration{}).Where("user_id = ? AND status != 'BANNED'", user.ID).Count(&contestCount)
 	influence += contestCount * 25
 
 	// ADMIN OVERRIDE: Supreme Influence
@@ -656,11 +712,15 @@ func GetBadges(c *gin.Context) {
 		influence = 1000000
 		rank = "Supreme Architect"
 	} else {
-		if influence > 500 {
-			rank = "Expert"
-		} else if influence > 200 {
+		if influence >= 5000 {
+			rank = "Architect"
+		} else if influence >= 1000 {
+			rank = "Rising Star"
+		} else if influence >= 500 {
 			rank = "Contributor"
-		} else if influence > 100 {
+		} else if influence >= 100 {
+			rank = "Explorer"
+		} else {
 			rank = "Apprentice"
 		}
 	}

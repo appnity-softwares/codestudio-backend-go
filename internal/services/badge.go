@@ -1,16 +1,17 @@
 package services
 
 import (
+	"time"
+
 	"github.com/pushp314/devconnect-backend/internal/database"
 	"github.com/pushp314/devconnect-backend/internal/models"
 )
 
-// CheckBadges checks if the user has earned any new badges after a submission
-// It returns a slice of newly awarded badges
+// CheckBadges checks if the user has earned any new badges after an action
 func CheckBadges(userID string) ([]models.Badge, error) {
 	var newBadges []models.Badge
 
-	// Get user's current badges
+	// 1. Get user's current badges
 	var existingBadgeIDs []string
 	database.DB.Model(&models.UserBadge{}).Where("user_id = ?", userID).Pluck("badge_id", &existingBadgeIDs)
 
@@ -19,72 +20,70 @@ func CheckBadges(userID string) ([]models.Badge, error) {
 		existingSet[id] = true
 	}
 
-	// Calculate stats
+	// 2. Fetch Stats
 	var solvedCount int64
-	database.DB.Model(&models.PracticeSubmission{}).
-		Where("user_id = ? AND status = ?", userID, "ACCEPTED").
-		Distinct("problem_id").
-		Count(&solvedCount)
+	database.DB.Model(&models.Submission{}).Where("user_id = ? AND status = 'ACCEPTED'", userID).Count(&solvedCount)
 
-	// Define rules
-	type BadgeRule struct {
-		ID          string
-		Name        string
-		Description string
-		Icon        string
-		Condition   func() bool
+	var snippetCount int64
+	database.DB.Model(&models.Snippet{}).Where("author_id = ? OR \"authorId\" = ?", userID, userID).Count(&snippetCount)
+
+	var feedbackCount int64
+	database.DB.Model(&models.FeedbackMessage{}).Where("user_id = ?", userID).Count(&feedbackCount)
+
+	var contestCount int64
+	database.DB.Model(&models.Registration{}).Where("user_id = ? AND status != 'BANNED'", userID).Count(&contestCount)
+
+	// Count Early Adopter qualification (First 1000 Users)
+	var rank int64
+	database.DB.Model(&models.User{}).
+		Where("created_at <= (SELECT created_at FROM users WHERE id = ?)", userID).
+		Count(&rank)
+
+	earlyAdopterStatus := int64(0)
+	if rank <= 1000 {
+		earlyAdopterStatus = 1
 	}
 
-	rules := []BadgeRule{
-		{
-			ID:          "first-blood",
-			Name:        "First Blood",
-			Description: "Solved your first practice problem",
-			Icon:        "🩸",
-			Condition:   func() bool { return solvedCount >= 1 },
-		},
-		{
-			ID:          "solver-5",
-			Name:        "Apprentice",
-			Description: "Solved 5 practice problems",
-			Icon:        "🥉",
-			Condition:   func() bool { return solvedCount >= 5 },
-		},
-		{
-			ID:          "solver-10",
-			Name:        "Problem Solver",
-			Description: "Solved 10 practice problems",
-			Icon:        "🥈",
-			Condition:   func() bool { return solvedCount >= 10 },
-		},
-		{
-			ID:          "solver-25",
-			Name:        "Algorithmist",
-			Description: "Solved 25 practice problems",
-			Icon:        "🥇",
-			Condition:   func() bool { return solvedCount >= 25 },
-		},
+	// 3. Define mapping of conditions to stats
+	stats := map[string]int64{
+		"1_snippet":          snippetCount,
+		"5_snippets":         snippetCount,
+		"25_snippets":        snippetCount,
+		"1_practice_solved":  solvedCount,
+		"5_practice_solved":  solvedCount,
+		"25_practice_solved": solvedCount,
+		"feedback_given":     feedbackCount,
+		"5_feedback":         feedbackCount,
+		"early_adopter":      earlyAdopterStatus,
+		"1_contest":          contestCount,
+		"5_contests":         contestCount,
 	}
 
-	// Check rules
-	for _, rule := range rules {
-		if !existingSet[rule.ID] && rule.Condition() {
+	// 4. Fetch all system badge definitions
+	var systemBadges []models.Badge
+	database.DB.Find(&systemBadges)
+
+	// 5. Evaluate each badge
+	for _, badge := range systemBadges {
+		// Skip if already owned
+		if existingSet[badge.ID] {
+			continue
+		}
+
+		progress, ok := stats[badge.Condition]
+		if !ok {
+			continue
+		}
+
+		if progress >= int64(badge.Threshold) {
 			// Award badge
-			badge := models.Badge{
-				ID:          rule.ID,
-				Name:        rule.Name,
-				Description: rule.Description,
-				Icon:        rule.Icon,
-			}
-
-			// Upsert Badge Definition (ensure it exists)
-			database.DB.FirstOrCreate(&badge, models.Badge{ID: rule.ID})
-
-			// Create UserBadge
 			userBadge := models.UserBadge{
-				UserID:  userID,
-				BadgeID: rule.ID,
+				UserID:     userID,
+				BadgeID:    badge.ID,
+				Progress:   int(progress),
+				UnlockedAt: time.Now(),
 			}
+
 			if err := database.DB.Create(&userBadge).Error; err == nil {
 				newBadges = append(newBadges, badge)
 			}

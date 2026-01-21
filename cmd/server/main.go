@@ -115,9 +115,12 @@ func main() {
 		auth.Use(middleware.AuthRateLimit())
 		routes.RegisterAuthRoutes(auth)
 
+		// Public system status (for maintenance page)
+		api.GET("/system/status", handlers.PublicGetSystemStatus)
+
 		// Protected routes - apply maintenance mode check
 		protected := api.Group("")
-		protected.Use(middleware.MaintenanceMode())
+		protected.Use(middleware.OptionalAuthMiddleware(), middleware.MaintenanceMode())
 
 		routes.RegisterSnippetRoutes(protected)
 		routes.RegisterUserRoutes(protected)
