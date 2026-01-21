@@ -45,6 +45,7 @@ func main() {
 		switch email {
 		case "pusprajsharma314@gmail.com":
 			username = "puspraj"
+			role = models.RoleAdmin // Making Puspraj Admin
 		case "jsaurabh334@gmail.com":
 			username = "saurabh"
 		case "sausha314@gmail.com":
