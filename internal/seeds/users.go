@@ -1,6 +1,7 @@
 package seeds
 
 import (
+	"fmt"
 	"log"
 
 	"github.com/google/uuid"
@@ -35,27 +36,20 @@ func SeedUsers() (models.User, error) {
 		log.Printf("   ℹ️ Admin User already exists: %s", admin.Username)
 	}
 
-	// Create some regular users for interaction
-	regularUsers := []models.User{
-		{
-			ID:       uuid.New().String(),
-			Username: "johndoe",
-			Email:    "john@example.com",
-			Password: string(hash),
-			Role:     "USER",
-			Image:    "https://api.dicebear.com/7.x/avataaars/svg?seed=john",
-		},
-		{
-			ID:       uuid.New().String(),
-			Username: "janedoe",
-			Email:    "jane@example.com",
-			Password: string(hash),
-			Role:     "USER",
-			Image:    "https://api.dicebear.com/7.x/avataaars/svg?seed=jane",
-		},
-	}
+	// Create 10 regular users for interaction
+	for i := 1; i <= 10; i++ {
+		username := fmt.Sprintf("dev_user_%d", i)
+		email := fmt.Sprintf("user%d@appnity.cloud", i)
 
-	for _, u := range regularUsers {
+		u := models.User{
+			ID:       uuid.New().String(),
+			Username: username,
+			Email:    email,
+			Password: string(hash),
+			Role:     "USER",
+			Image:    fmt.Sprintf("https://api.dicebear.com/7.x/avataaars/svg?seed=%s", username),
+		}
+
 		var existing models.User
 		if err := database.DB.Where("username = ?", u.Username).First(&existing).Error; err != nil {
 			database.DB.Create(&u)

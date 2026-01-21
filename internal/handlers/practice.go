@@ -54,9 +54,9 @@ func ListPracticeProblems(c *gin.Context) {
 		// Single query to get all solved problem IDs for this user
 		var solvedIDs []string
 		database.DB.Model(&models.PracticeSubmission{}).
-			Where("user_id = ? AND status = ? AND problem_id IN ?", userID, "ACCEPTED", problemIDs).
-			Distinct("problem_id").
-			Pluck("problem_id", &solvedIDs)
+			Where("\"userId\" = ? AND status = ? AND \"problemId\" IN ?", userID, "ACCEPTED", problemIDs).
+			Distinct("\"problemId\"").
+			Pluck("\"problemId\"", &solvedIDs)
 
 		solvedSet := make(map[string]bool)
 		for _, id := range solvedIDs {
@@ -106,7 +106,7 @@ func GetPracticeProblem(c *gin.Context) {
 	if userID, exists := c.Get("userId"); exists {
 		var count int64
 		database.DB.Model(&models.PracticeSubmission{}).
-			Where("user_id = ? AND problem_id = ? AND status = ?", userID, id, "ACCEPTED").
+			Where("\"userId\" = ? AND \"problemId\" = ? AND status = ?", userID, id, "ACCEPTED").
 			Count(&count)
 		isSolved = count > 0
 	}
@@ -285,7 +285,7 @@ func SubmitPracticeSolution(c *gin.Context) {
 		// 1. Update Solve Count (if first time)
 		var prevSolves int64
 		database.DB.Model(&models.PracticeSubmission{}).
-			Where("user_id = ? AND problem_id = ? AND status = ? AND id != ?",
+			Where("\"userId\" = ? AND \"problemId\" = ? AND status = ? AND id != ?",
 				uid, input.ProblemID, "ACCEPTED", submission.ID).
 			Count(&prevSolves)
 
