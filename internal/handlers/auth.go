@@ -329,6 +329,15 @@ func handleOAuthLogin(c *gin.Context, email, name, image string) {
 	result := database.DB.Where("email = ?", email).First(&user)
 
 	if result.Error == gorm.ErrRecordNotFound {
+		// Check if registration is open
+		var regSetting models.SystemSettings
+		if err := database.DB.Where("key = ?", models.SettingRegistrationOpen).First(&regSetting).Error; err == nil {
+			if regSetting.Value == "false" {
+				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "User registration is currently closed"})
+				return
+			}
+		}
+
 		// 2. Register new user
 		user = models.User{
 			ID:       uuid.New().String(),

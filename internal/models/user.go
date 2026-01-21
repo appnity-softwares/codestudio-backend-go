@@ -10,8 +10,9 @@ import (
 type Role string
 
 const (
-	RoleUser  Role = "USER"
-	RoleAdmin Role = "ADMIN"
+	RoleUser      Role = "USER"
+	RoleAdmin     Role = "ADMIN"
+	RoleModerator Role = "MODERATOR"
 )
 
 type Visibility string

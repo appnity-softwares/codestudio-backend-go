@@ -448,6 +448,11 @@ func ListCommunityUsers(c *gin.Context) {
 
 	query := database.DB.Model(&models.User{}).Where("search_visible = ? AND onboarding_completed = ?", true, true)
 
+	// Don't show own profile in community list
+	if userID, exists := c.Get("userId"); exists {
+		query = query.Where("id != ?", userID)
+	}
+
 	if search != "" {
 		searchLike := utils.SanitizeSearchQuery(search)
 		query = query.Where("username ILIKE ? OR name ILIKE ?", searchLike, searchLike)
@@ -455,18 +460,26 @@ func ListCommunityUsers(c *gin.Context) {
 
 	// Sorting
 	switch sort {
+	case "recommended":
+		// Get current user's preferences if logged in
+		userID, exists := c.Get("userId")
+		if exists {
+			var me models.User
+			if err := database.DB.First(&me, "id = ?", userID).Error; err == nil && (len(me.PreferredLanguages) > 0 || len(me.Interests) > 0) {
+				// Use PostgreSQL && operator for array overlap
+				// We'll prioritize users who have overlap, then trust score
+				query = query.Order(database.DB.Raw("(CASE WHEN preferred_languages && ? OR interests && ? THEN 1 ELSE 0 END) DESC", me.PreferredLanguages, me.Interests))
+			}
+		}
+		query = query.Order("trust_score desc, \"createdAt\" desc")
 	case "active":
-		// approximation: createdAt or recent activity?
-		// for now, recently joined (using quoted createdAt for Postgres camelCase)
 		query = query.Order("\"createdAt\" desc")
 	case "trust":
 		query = query.Order("trust_score desc")
 	case "snippets":
-		// efficient sort requires column. We added `snippet_count` to model but haven't populated it.
-		// Fallback: trust score
 		query = query.Order("trust_score desc")
 	default:
-		// "most active" -> maybe trust score is best proxy for now without complex activity table joins
+		// Default to recommended
 		query = query.Order("trust_score desc")
 	}
 
@@ -496,10 +509,40 @@ func ListCommunityUsers(c *gin.Context) {
 			"createdAt":    u.CreatedAt,
 			"snippetCount": snippetCount,
 			"contestCount": contestCount,
+			"languages":    u.PreferredLanguages,
+			"interests":    u.Interests,
 		})
 	}
 
 	c.JSON(http.StatusOK, gin.H{"users": safeUsers, "page": page})
+}
+
+// SearchSuggestions handles GET /community/search-suggestions
+func SearchSuggestions(c *gin.Context) {
+	q := c.Query("q")
+	if q == "" {
+		c.JSON(http.StatusOK, gin.H{"users": []gin.H{}})
+		return
+	}
+
+	searchPattern := q + "%"
+	var users []models.User
+	database.DB.Model(&models.User{}).
+		Where("onboarding_completed = ? AND (username ILIKE ? OR name ILIKE ?)", true, searchPattern, searchPattern).
+		Limit(5).
+		Find(&users)
+
+	var suggestions []gin.H
+	for _, u := range users {
+		suggestions = append(suggestions, gin.H{
+			"username": u.Username,
+			"name":     u.Name,
+			"image":    u.Image,
+			"bio":      u.Bio,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{"users": suggestions})
 }
 
 // GetStats handles GET /users/stats - Returns real engagement data for dashboard

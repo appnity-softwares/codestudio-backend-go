@@ -71,6 +71,7 @@ func main() {
 		&models.FeedbackReaction{},
 		&models.FeedbackDisagree{},
 		&models.AvatarSeed{},
+		&models.RolePermission{},
 	}
 
 	for _, m := range tableModels {

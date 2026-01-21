@@ -20,12 +20,15 @@ const (
 	ActionUpdateContest ActionType = "UPDATE_CONTEST"
 	ActionDeleteContest ActionType = "DELETE_CONTEST"
 
-	ActionCreateProblem ActionType = "CREATE_PROBLEM"
-	ActionUpdateProblem ActionType = "UPDATE_PROBLEM"
-	ActionDeleteProblem ActionType = "DELETE_PROBLEM"
+	ActionCreateProblem   ActionType = "CREATE_PROBLEM"
+	ActionUpdateProblem   ActionType = "UPDATE_PROBLEM"
+	ActionDeleteProblem   ActionType = "DELETE_PROBLEM"
 	ActionReorderProblems ActionType = "REORDER_PROBLEMS"
-)
 
+	ActionUpdateUser        ActionType = "UPDATE_USER"
+	ActionDeleteUser        ActionType = "DELETE_USER"
+	ActionUpdatePermissions ActionType = "UPDATE_PERMISSIONS"
+)
 
 type AdminAction struct {
 	ID         string     `gorm:"primaryKey;type:text" json:"id"`

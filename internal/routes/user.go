@@ -34,6 +34,7 @@ func RegisterUserRoutes(r gin.IRouter) {
 	}
 
 	// Community & Public Profile Routes (Root under /api usually)
-	r.GET("/community/users", handlers.ListCommunityUsers)
+	r.GET("/community/users", middleware.OptionalAuthMiddleware(), handlers.ListCommunityUsers)
+	r.GET("/community/search-suggestions", handlers.SearchSuggestions)
 	r.GET("/public/users/:username", handlers.GetPublicProfile)
 }

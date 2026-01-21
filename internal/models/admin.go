@@ -51,6 +51,19 @@ type SystemSettings struct {
 	Admin User `gorm:"foreignKey:UpdatedBy" json:"admin,omitempty"`
 }
 
+// RolePermission defines permissions for a specific role
+type RolePermission struct {
+	Role              Role      `gorm:"primaryKey;type:text" json:"role"`
+	CanManageUsers    bool      `gorm:"default:false" json:"canManageUsers"`
+	CanManageSnippets bool      `gorm:"default:false" json:"canManageSnippets"`
+	CanManageContests bool      `gorm:"default:false" json:"canManageContests"`
+	CanManageProblems bool      `gorm:"default:false" json:"canManageProblems"`
+	CanViewAuditLogs  bool      `gorm:"default:false" json:"canViewAuditLogs"`
+	CanManageSystem   bool      `gorm:"default:false" json:"canManageSystem"` // Usually Admin only
+	UpdatedAt         time.Time `json:"updatedAt"`
+	UpdatedBy         string    `json:"updatedBy"`
+}
+
 // System setting keys (constants for type safety)
 const (
 	SettingMaintenanceMode    = "maintenance_mode"

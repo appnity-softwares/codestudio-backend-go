@@ -630,6 +630,130 @@ func AdminRestoreSubmission(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Submission restored"})
 }
 
+// AdminUpdateUser handles PUT /admin/users/:id
+func AdminUpdateUser(c *gin.Context) {
+	targetUserID := c.Param("id")
+	adminID := getAdminID(c)
+
+	var req struct {
+		Name       string `json:"name"`
+		Username   string `json:"username"`
+		Bio        string `json:"bio"`
+		Email      string `json:"email"`
+		Role       string `json:"role"`
+		TrustScore int    `json:"trustScore"`
+		IsBlocked  bool   `json:"isBlocked"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		var user models.User
+		if err := tx.First(&user, "id = ?", targetUserID).Error; err != nil {
+			return err
+		}
+
+		// Check username uniqueness if changed
+		if req.Username != "" && req.Username != user.Username {
+			var count int64
+			tx.Model(&models.User{}).Where("username = ? AND id != ?", req.Username, targetUserID).Count(&count)
+			if count > 0 {
+				return gorm.ErrInvalidData // Custom error would be better
+			}
+		}
+
+		updates := map[string]interface{}{
+			"name":        req.Name,
+			"username":    req.Username,
+			"bio":         req.Bio,
+			"email":       req.Email,
+			"role":        models.Role(req.Role),
+			"trust_score": req.TrustScore,
+			"is_blocked":  req.IsBlocked,
+		}
+
+		if err := tx.Model(&user).Updates(updates).Error; err != nil {
+			return err
+		}
+
+		return logAdminAction(tx, adminID, models.ActionUpdateUser, targetUserID, "user", "Updated by Admin")
+	})
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "User updated successfully"})
+}
+
+// AdminDeleteUser handles DELETE /admin/users/:id
+func AdminDeleteUser(c *gin.Context) {
+	targetUserID := c.Param("id")
+	adminID := getAdminID(c)
+
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		var user models.User
+		if err := tx.First(&user, "id = ?", targetUserID).Error; err != nil {
+			return err
+		}
+
+		// Soft delete or Hard delete? Usually soft delete is safer.
+		// models.User has gorm.DeletedAt, so tx.Delete will soft delete.
+		if err := tx.Delete(&user).Error; err != nil {
+			return err
+		}
+
+		return logAdminAction(tx, adminID, models.ActionDeleteUser, targetUserID, "user", "Deleted by Admin")
+	})
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "User deleted successfully"})
+}
+
+// AdminGetRolePermissions handles GET /admin/roles/permissions
+func AdminGetRolePermissions(c *gin.Context) {
+	var perms []models.RolePermission
+	database.DB.Find(&perms)
+	c.JSON(http.StatusOK, gin.H{"permissions": perms})
+}
+
+// AdminUpdateRolePermission handles PUT /admin/roles/permissions
+func AdminUpdateRolePermission(c *gin.Context) {
+	adminID := getAdminID(c)
+
+	var req models.RolePermission
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if req.Role == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Role is required"})
+		return
+	}
+
+	req.UpdatedAt = time.Now()
+	req.UpdatedBy = adminID
+
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(&req).Error; err != nil {
+			return err
+		}
+		return logAdminAction(tx, adminID, models.ActionUpdatePermissions, string(req.Role), "role", "Permissions updated for "+string(req.Role))
+	})
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Permissions updated successfully", "permission": req})
+}
+
 // ============================================
 // SYSTEM CONTROLS
 // ============================================

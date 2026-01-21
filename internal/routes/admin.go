@@ -8,92 +8,117 @@ import (
 
 func RegisterAdminRoutes(rg *gin.RouterGroup) {
 	admin := rg.Group("/admin")
-	admin.Use(middleware.AuthMiddleware(), middleware.AdminOnly())
+	admin.Use(middleware.AuthMiddleware())
 
 	// Dashboard
-	admin.GET("/dashboard", handlers.AdminGetDashboard)
-
-	// Contest Management
-	// Contest Management
-	admin.GET("/contests", handlers.AdminListContests)
-	admin.POST("/contests", handlers.AdminCreateContest)
-	admin.PUT("/contests/:id", handlers.AdminUpdateContest)
-	admin.DELETE("/contests/:id", handlers.AdminDeleteContest)
-	admin.POST("/contests/:id/start", handlers.AdminStartContest)
-	admin.POST("/contests/:id/freeze", handlers.AdminFreezeContest)
-	admin.POST("/contests/:id/end", handlers.AdminEndContest)
-	admin.GET("/contests/:id/participants", handlers.AdminGetContestParticipants)
-
-	// Problem Management (Contests)
-	admin.GET("/problems/:id", handlers.AdminGetProblem)
-	admin.POST("/problems", handlers.AdminCreateProblem)
-	admin.PUT("/problems/:id", handlers.AdminUpdateProblem)
-	admin.DELETE("/problems/:id", handlers.AdminDeleteProblem)
-	admin.POST("/problems/reorder", handlers.AdminReorderProblems)
-
-	// Practice Problem Management
-	admin.GET("/practice-problems", handlers.AdminListPracticeProblems)
-	admin.GET("/practice-problems/:id", handlers.AdminGetPracticeProblem)
-	admin.POST("/practice-problems", handlers.AdminCreatePracticeProblem)
-	admin.PUT("/practice-problems/:id", handlers.AdminUpdatePracticeProblem)
-	admin.DELETE("/practice-problems/:id", handlers.AdminDeletePracticeProblem)
-
-	// Test Case Management
-	admin.POST("/problems/:id/testcases", handlers.AdminCreateTestCase)
-	admin.PUT("/testcases/:tcId", handlers.AdminUpdateTestCase)
-	admin.DELETE("/testcases/:tcId", handlers.AdminDeleteTestCase)
-
-	// Flag Review
-	admin.GET("/flags", handlers.AdminGetFlags)
-	admin.POST("/flags/:id/ignore", handlers.AdminIgnoreFlag)
-	admin.POST("/flags/:id/warn", handlers.AdminWarnSubmission)
-	admin.POST("/flags/:id/disqualify-submission", handlers.AdminDisqualifySubmission)
-	admin.POST("/flags/:id/disqualify-user", handlers.AdminDisqualifyUser)
+	// Dashboard (Generic Staff Access)
+	admin.GET("/dashboard", middleware.StaffOnly(""), handlers.AdminGetDashboard)
 
 	// User Management
-	admin.GET("/users", handlers.AdminListUsers)
-	admin.GET("/users/search", handlers.AdminSearchUsers)
-	admin.GET("/users/:id", handlers.AdminGetUserDetail)
-	admin.POST("/users/:id/warn", handlers.AdminWarnUser)
-	admin.POST("/users/:id/suspend", handlers.AdminSuspendUser)
-	admin.POST("/users/:id/unsuspend", handlers.AdminUnsuspendUser)
-	admin.POST("/users/:id/ban-contest", handlers.AdminBanContest)
-	admin.POST("/users/:id/trust", handlers.AdminAdjustTrustScore)
+	users := admin.Group("/users")
+	users.Use(middleware.StaffOnly("CanManageUsers"))
+	{
+		users.GET("", handlers.AdminListUsers)
+		users.GET("/search", handlers.AdminSearchUsers)
+		users.GET("/:id", handlers.AdminGetUserDetail)
+		users.POST("/:id/warn", handlers.AdminWarnUser)
+		users.POST("/:id/suspend", handlers.AdminSuspendUser)
+		users.POST("/:id/unsuspend", handlers.AdminUnsuspendUser)
+		users.POST("/:id/ban-contest", handlers.AdminBanContest)
+		users.POST("/:id/trust", handlers.AdminAdjustTrustScore)
+		users.PUT("/:id", handlers.AdminUpdateUser)
+		users.DELETE("/:id", handlers.AdminDeleteUser)
+	}
 
-	// Submissions
-	admin.GET("/submissions", handlers.AdminListSubmissions)
-	admin.GET("/submissions/:id", handlers.AdminGetSubmissionDetail)
-	admin.POST("/submissions/:id/restore", handlers.AdminRestoreSubmission)
+	// Contest & Problem Management
+	contests := admin.Group("")
+	contests.Use(middleware.StaffOnly("CanManageContests"))
+	{
+		contests.GET("/contests", handlers.AdminListContests)
+		contests.POST("/contests", handlers.AdminCreateContest)
+		contests.PUT("/contests/:id", handlers.AdminUpdateContest)
+		contests.DELETE("/contests/:id", handlers.AdminDeleteContest)
+		contests.POST("/contests/:id/start", handlers.AdminStartContest)
+		contests.POST("/contests/:id/freeze", handlers.AdminFreezeContest)
+		contests.POST("/contests/:id/end", handlers.AdminEndContest)
+		contests.GET("/contests/:id/participants", handlers.AdminGetContestParticipants)
 
-	// Snippet Moderation
-	admin.POST("/snippets/:id/pin", handlers.AdminPinSnippet)
+		// Problems
+		contests.GET("/problems/:id", handlers.AdminGetProblem)
+		contests.POST("/problems", handlers.AdminCreateProblem)
+		contests.PUT("/problems/:id", handlers.AdminUpdateProblem)
+		contests.DELETE("/problems/:id", handlers.AdminDeleteProblem)
+		contests.POST("/problems/reorder", handlers.AdminReorderProblems)
 
-	// System Settings
-	admin.GET("/system", handlers.AdminGetSystemSettings)
-	admin.PUT("/system", handlers.AdminUpdateSystemSettings)
+		// Test Cases
+		contests.POST("/problems/:id/testcases", handlers.AdminCreateTestCase)
+		contests.PUT("/testcases/:tcId", handlers.AdminUpdateTestCase)
+		contests.DELETE("/testcases/:tcId", handlers.AdminDeleteTestCase)
 
-	// Analytics
-	admin.GET("/analytics/top-snippets", handlers.AdminGetTopSnippets)
-	admin.GET("/analytics/suspicious", handlers.AdminGetSuspiciousActivity)
+		// Practice Problems
+		contests.GET("/practice-problems", handlers.AdminListPracticeProblems)
+		contests.GET("/practice-problems/:id", handlers.AdminGetPracticeProblem)
+		contests.POST("/practice-problems", handlers.AdminCreatePracticeProblem)
+		contests.PUT("/practice-problems/:id", handlers.AdminUpdatePracticeProblem)
+		contests.DELETE("/practice-problems/:id", handlers.AdminDeletePracticeProblem)
+	}
 
-	// Audit
-	admin.GET("/audit-logs", handlers.AdminGetAuditLogs)
+	// Flag Review & Submissions (Moderation)
+	moderation := admin.Group("")
+	moderation.Use(middleware.StaffOnly("CanManageSnippets")) // Snippets/Submissions grouped
+	{
+		moderation.GET("/flags", handlers.AdminGetFlags)
+		moderation.POST("/flags/:id/ignore", handlers.AdminIgnoreFlag)
+		moderation.POST("/flags/:id/warn", handlers.AdminWarnSubmission)
+		moderation.POST("/flags/:id/disqualify-submission", handlers.AdminDisqualifySubmission)
+		moderation.POST("/flags/:id/disqualify-user", handlers.AdminDisqualifyUser)
 
-	// Changelog
-	admin.GET("/changelog", handlers.AdminListChangelogs)
-	admin.POST("/changelog", handlers.AdminCreateChangelog)
-	admin.PUT("/changelog/:id", handlers.AdminUpdateChangelog)
-	admin.DELETE("/changelog/:id", handlers.AdminDeleteChangelog)
+		moderation.GET("/submissions", handlers.AdminListSubmissions)
+		moderation.GET("/submissions/:id", handlers.AdminGetSubmissionDetail)
+		moderation.POST("/submissions/:id/restore", handlers.AdminRestoreSubmission)
 
-	// Feedback Moderation
-	admin.GET("/feedback", handlers.AdminListFeedback)
-	admin.PUT("/feedback/:id/status", handlers.AdminUpdateFeedbackStatus)
-	admin.POST("/feedback/:id/lock", handlers.AdminLockFeedback)
-	admin.POST("/feedback/:id/hide", handlers.AdminHideFeedback)
-	admin.POST("/feedback/:id/pin", handlers.AdminPinFeedback)
-	admin.POST("/feedback/:id/convert", handlers.AdminConvertToChangelog)
+		moderation.POST("/snippets/:id/pin", handlers.AdminPinSnippet)
 
-	// Avatar Management
-	admin.POST("/avatars", handlers.AdminAddAvatarSeed)
-	admin.DELETE("/avatars/:id", handlers.AdminDeleteAvatarSeed)
+		// Avatars also usually staff/moderation
+		moderation.POST("/avatars", handlers.AdminAddAvatarSeed)
+		moderation.DELETE("/avatars/:id", handlers.AdminDeleteAvatarSeed)
+	}
+
+	// Audit Logs (Granular Permission)
+	audit := admin.Group("")
+	audit.Use(middleware.StaffOnly("CanViewAuditLogs"))
+	{
+		audit.GET("/audit-logs", handlers.AdminGetAuditLogs)
+		audit.GET("/analytics/suspicious", handlers.AdminGetSuspiciousActivity)
+	}
+
+	// System & Admin-Only Stuff
+	restricted := admin.Group("")
+	restricted.Use(middleware.AdminOnly())
+	{
+		// Role Permissions
+		restricted.GET("/roles/permissions", handlers.AdminGetRolePermissions)
+		restricted.PUT("/roles/permissions", handlers.AdminUpdateRolePermission)
+
+		// System Settings
+		restricted.GET("/system", handlers.AdminGetSystemSettings)
+		restricted.PUT("/system", handlers.AdminUpdateSystemSettings)
+
+		// Analytics (Full)
+		restricted.GET("/analytics/top-snippets", handlers.AdminGetTopSnippets)
+
+		// Changelog
+		restricted.GET("/changelog", handlers.AdminListChangelogs)
+		restricted.POST("/changelog", handlers.AdminCreateChangelog)
+		restricted.PUT("/changelog/:id", handlers.AdminUpdateChangelog)
+		restricted.DELETE("/changelog/:id", handlers.AdminDeleteChangelog)
+
+		// Feedback
+		restricted.GET("/feedback", handlers.AdminListFeedback)
+		restricted.PUT("/feedback/:id/status", handlers.AdminUpdateFeedbackStatus)
+		restricted.POST("/feedback/:id/lock", handlers.AdminLockFeedback)
+		restricted.POST("/feedback/:id/hide", handlers.AdminHideFeedback)
+		restricted.POST("/feedback/:id/pin", handlers.AdminPinFeedback)
+		restricted.POST("/feedback/:id/convert", handlers.AdminConvertToChangelog)
+	}
 }
