@@ -81,25 +81,26 @@ func main() {
 	for _, user := range users {
 		for i := 1; i <= 5; i++ {
 			snippet := models.Snippet{
-				ID:                uuid.New().String(),
-				Title:             fmt.Sprintf("%s's Snippet #%d", user.Username, i),
-				Description:       fmt.Sprintf("A cool snippet by %s tracking achievement %d", user.Username, i),
-				Code:              "print('Hello CodeStudio!')",
-				Language:          "python",
-				Status:            "PUBLISHED",
-				Verified:          true,
-				AuthorID:          user.ID,
-				Visibility:        "public",
-				ExecutionLanguage: "python",
-				CreatedAt:         time.Now(),
-				UpdatedAt:         time.Now(),
+				ID:                  uuid.New().String(),
+				Title:               fmt.Sprintf("%s's Snippet #%d", user.Username, i),
+				Description:         fmt.Sprintf("A cool snippet by %s tracking achievement %d", user.Username, i),
+				Code:                "print('Hello CodeStudio!')",
+				Language:            "python",
+				Status:              "PUBLISHED",
+				Verified:            true,
+				LastExecutionStatus: "SUCCESS", // REQUIRED to pass BeforeSave validation
+				AuthorID:            user.ID,
+				Visibility:          "public",
+				ExecutionLanguage:   "python",
+				CreatedAt:           time.Now(),
+				UpdatedAt:           time.Now(),
 			}
 			if err := database.DB.Create(&snippet).Error; err != nil {
-				log.Printf("Failed to seed snippet for %s: %v", user.Username, err)
+				log.Printf("❌ Failed to seed snippet for %s: %v", user.Username, err)
 			}
 		}
 	}
-	fmt.Println("✅ Seeded 25 Snippets")
+	fmt.Println("✅ Snippet Seeding Attempt Complete")
 
 	// 5. Seed 24 Challenges (Events & Problems)
 	for i := 1; i <= 24; i++ {
@@ -220,9 +221,6 @@ func clearDatabase() {
 		"User", // Truncate User last
 	}
 
-	// Disable foreign key checks for truncation in Postgres
-	database.DB.Exec("SET session_replication_role = 'replica';")
-
 	for _, table := range tables {
 		if err := database.DB.Exec(fmt.Sprintf("TRUNCATE TABLE \"%s\" CASCADE", table)).Error; err != nil {
 			// Some tables might not have quotes or might have different case
@@ -231,6 +229,5 @@ func clearDatabase() {
 		}
 	}
 
-	database.DB.Exec("SET session_replication_role = 'origin';")
 	fmt.Println("✅ Database cleaned")
 }
