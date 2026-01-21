@@ -78,7 +78,7 @@ func GetProfileSummary(c *gin.Context) {
 	// 2. Count PUBLISHED Snippets & Aggregate by Language
 	var totalSnippets int64
 	database.DB.Model(&models.Snippet{}).
-		Where("(author_id = ? OR \"authorId\" = ?) AND status = ?", user.ID, user.ID, "PUBLISHED").
+		Where("\"authorId\" = ? AND status = ?", user.ID, "PUBLISHED").
 		Count(&totalSnippets)
 
 	// Group by Language
@@ -89,7 +89,7 @@ func GetProfileSummary(c *gin.Context) {
 	var langResults []LangResult
 	database.DB.Model(&models.Snippet{}).
 		Select("language, count(*) as count").
-		Where("(author_id = ? OR \"authorId\" = ?) AND status = ?", user.ID, user.ID, "PUBLISHED").
+		Where("\"authorId\" = ? AND status = ?", user.ID, "PUBLISHED").
 		Group("language").
 		Scan(&langResults)
 
@@ -401,15 +401,15 @@ func GetPublicProfile(c *gin.Context) {
 	// We'll trust cached columns if updated, but update them on reads occasionally?
 	// For MVP, let's just do count queries, Postgres handles them fast enough for <100k users.
 	var snippetCount int64
-	database.DB.Model(&models.Snippet{}).Where("(author_id = ? OR \"authorId\" = ?) AND status = 'PUBLISHED'", user.ID, user.ID).Count(&snippetCount)
+	database.DB.Model(&models.Snippet{}).Where("\"authorId\" = ? AND status = 'PUBLISHED'", user.ID).Count(&snippetCount)
 
 	var contestCount int64
 	database.DB.Model(&models.Registration{}).Where("user_id = ?", user.ID).Count(&contestCount)
 
 	// Fetch Top 3 Snippets by Views
 	var topSnippets []models.Snippet
-	database.DB.Where("(author_id = ? OR \"authorId\" = ?) AND status = 'PUBLISHED'", user.ID, user.ID).
-		Order("view_count desc").Limit(3).Find(&topSnippets)
+	database.DB.Where("\"authorId\" = ? AND status = 'PUBLISHED'", user.ID).
+		Order("views_count desc").Limit(3).Find(&topSnippets)
 
 	// Sanitize Response
 	safeUser := gin.H{
@@ -502,7 +502,7 @@ func ListCommunityUsers(c *gin.Context) {
 	var safeUsers []gin.H
 	for _, u := range users {
 		var snippetCount int64
-		database.DB.Model(&models.Snippet{}).Where("(author_id = ? OR \"authorId\" = ?) AND status = 'PUBLISHED'", u.ID, u.ID).Count(&snippetCount)
+		database.DB.Model(&models.Snippet{}).Where("\"authorId\" = ? AND status = 'PUBLISHED'", u.ID).Count(&snippetCount)
 
 		var contestCount int64
 		database.DB.Model(&models.Registration{}).Where("user_id = ?", u.ID).Count(&contestCount)
@@ -571,20 +571,20 @@ func GetStats(c *gin.Context) {
 
 	// Count total snippets
 	var snippetCount int64
-	database.DB.Model(&models.Snippet{}).Where("(\"authorId\" = ? OR author_id = ?)", userId, userId).Count(&snippetCount)
+	database.DB.Model(&models.Snippet{}).Where("\"authorId\" = ?", userId).Count(&snippetCount)
 
 	// v1.2: Count total forks received on user's snippets
 	var totalForksReceived int64
 	database.DB.Model(&models.Snippet{}).
 		Select("COALESCE(SUM(fork_count), 0)").
-		Where("(\"authorId\" = ? OR author_id = ?)", userId, userId).
+		Where("\"authorId\" = ?", userId).
 		Scan(&totalForksReceived)
 
 	// v1.2: Count total copies received
 	var totalCopiesReceived int64
 	database.DB.Model(&models.Snippet{}).
 		Select("COALESCE(SUM(copy_count), 0)").
-		Where("(\"authorId\" = ? OR author_id = ?)", userId, userId).
+		Where("\"authorId\" = ?", userId).
 		Scan(&totalCopiesReceived)
 
 	// v1.2: Count contest solves (successful submissions)
@@ -649,7 +649,7 @@ func GetUserSnippets(c *gin.Context) {
 	userId := c.Param("username")
 
 	snippets := []models.Snippet{}
-	if err := database.DB.Where("\"authorId\" = ? OR author_id = ?", userId, userId).Preload("Author").Find(&snippets).Error; err != nil {
+	if err := database.DB.Where("\"authorId\" = ?", userId).Preload("Author").Find(&snippets).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch snippets"})
 		return
 	}

@@ -298,7 +298,10 @@ func AdminGetSnippets(c *gin.Context) {
 	query.Count(&total)
 
 	var snippets []models.Snippet
-	query.Order("created_at desc").Offset(offset).Limit(limit).Find(&snippets)
+	if err := query.Order("\"createdAt\" desc").Offset(offset).Limit(limit).Find(&snippets).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch snippets"})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"snippets": snippets,
