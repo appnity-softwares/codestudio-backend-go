@@ -388,7 +388,7 @@ func AdminListUsers(c *gin.Context) {
 	}
 
 	query.Count(&total)
-	query.Order("created_at desc").Offset(offset).Limit(limit).Find(&users)
+	query.Order("\"createdAt\" desc").Offset(offset).Limit(limit).Find(&users)
 
 	c.JSON(http.StatusOK, gin.H{
 		"users": users,

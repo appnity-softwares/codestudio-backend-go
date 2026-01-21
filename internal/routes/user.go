@@ -21,6 +21,7 @@ func RegisterUserRoutes(r gin.IRouter) {
 		// Public (Wildcard last)
 		// users.GET("", handlers.ListUsers) // Community list disabled for MVP
 		users.GET("/profile/summary", handlers.GetProfileSummary) // /users/profile/summary
+		users.GET("/avatars", handlers.GetAvatarSeeds)
 		users.GET("/:username", handlers.GetProfile)
 		users.GET("/:username/snippets", handlers.GetUserSnippets)
 		users.GET("/:username/badges", handlers.GetBadges)

@@ -70,6 +70,7 @@ func main() {
 		&models.FeedbackMessage{},
 		&models.FeedbackReaction{},
 		&models.FeedbackDisagree{},
+		&models.AvatarSeed{},
 	}
 
 	for _, m := range tableModels {

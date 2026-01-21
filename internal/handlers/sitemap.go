@@ -63,7 +63,7 @@ func GenerateSitemap(c *gin.Context) {
 
 	// 3. Snippets (Public only)
 	var snippets []models.Snippet
-	database.DB.Select("id, updated_at").Where("visibility = ?", "PUBLIC").Order("created_at desc").Limit(2000).Find(&snippets)
+	database.DB.Select("id, \"updatedAt\"").Where("visibility = ?", "PUBLIC").Order("\"createdAt\" desc").Limit(2000).Find(&snippets)
 	for _, s := range snippets {
 		urls = append(urls, SitemapEntry{
 			Loc:        fmt.Sprintf("%s/snippet/%s", BaseURL, s.ID),
@@ -87,7 +87,7 @@ func GenerateSitemap(c *gin.Context) {
 
 	// 5. User Profiles (Public only)
 	var users []models.User
-	database.DB.Select("username, created_at").Where("visibility = ?", "PUBLIC").Limit(1000).Find(&users)
+	database.DB.Select("username, \"createdAt\"").Where("visibility = ?", "PUBLIC").Limit(1000).Find(&users)
 	for _, u := range users {
 		urls = append(urls, SitemapEntry{
 			Loc:        fmt.Sprintf("%s/u/%s", BaseURL, u.Username),

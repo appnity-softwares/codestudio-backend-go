@@ -137,6 +137,7 @@ type UpdateMeInput struct {
 	Bio            *string  `json:"bio"`
 	GithubURL      *string  `json:"githubUrl"`
 	InstagramURL   *string  `json:"instagramUrl"`
+	LinkedInURL    *string  `json:"linkedinUrl"`
 	Visibility     *string  `json:"visibility"`
 	Onboarding     *bool    `json:"onboardingCompleted"`
 	PreferredLangs []string `json:"preferredLanguages"`
@@ -144,13 +145,24 @@ type UpdateMeInput struct {
 }
 
 type OnboardingInput struct {
-	Bio       string   `json:"bio"`
-	Languages []string `json:"languages"`
-	Interests []string `json:"interests"`
+	Name         string   `json:"name" binding:"required"`
+	Username     string   `json:"username" binding:"required"`
+	Bio          string   `json:"bio"`
+	Image        string   `json:"image"`
+	GithubURL    string   `json:"githubUrl"`
+	InstagramURL string   `json:"instagramUrl"`
+	LinkedInURL  string   `json:"linkedinUrl"`
+	Languages    []string `json:"languages"`
+	Interests    []string `json:"interests"`
 }
 
 func CompleteOnboarding(c *gin.Context) {
-	userID := c.GetString("userID")
+	userID, exists := c.Get("userId")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
 	var input OnboardingInput
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -163,13 +175,27 @@ func CompleteOnboarding(c *gin.Context) {
 		return
 	}
 
-	// Helper to create pointer to array string
-	langs := fmt.Sprintf("{%s}", joinStrings(input.Languages))
-	interests := fmt.Sprintf("{%s}", joinStrings(input.Interests))
+	// Name and Username are required from input
+	user.Name = input.Name
+
+	// Double check username uniqueness if changed
+	if input.Username != user.Username {
+		var count int64
+		database.DB.Model(&models.User{}).Where("username = ? AND id != ?", input.Username, userID).Count(&count)
+		if count > 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Username already taken"})
+			return
+		}
+		user.Username = input.Username
+	}
 
 	user.Bio = input.Bio
-	user.PreferredLanguages = &langs
-	user.Interests = &interests
+	user.Image = input.Image
+	user.GithubURL = input.GithubURL
+	user.InstagramURL = input.InstagramURL
+	user.LinkedInURL = input.LinkedInURL
+	user.PreferredLanguages = input.Languages
+	user.Interests = input.Interests
 	user.OnboardingCompleted = true
 
 	if err := database.DB.Save(&user).Error; err != nil {
@@ -181,28 +207,21 @@ func CompleteOnboarding(c *gin.Context) {
 }
 
 // Helper for array string formating
-func joinStrings(s []string) string {
-	res := ""
-	for i, v := range s {
-		if i > 0 {
-			res += ","
-		}
-		res += fmt.Sprintf("\"%s\"", v)
-	}
-	return res
-}
 
 type UpdateProfileInput struct {
-	Name                 string  `json:"name"`
-	Username             string  `json:"username"`
-	Bio                  string  `json:"bio"`
-	Image                string  `json:"image"`
-	GithubURL            string  `json:"githubUrl"`
-	InstagramURL         string  `json:"instagramUrl"`
-	Visibility           string  `json:"visibility"`
-	PinnedSnippetID      *string `json:"pinnedSnippetId"` // MVP v1.1
-	PublicProfileEnabled *bool   `json:"publicProfileEnabled"`
-	SearchVisible        *bool   `json:"searchVisible"`
+	Name                 string   `json:"name"`
+	Username             string   `json:"username"`
+	Bio                  string   `json:"bio"`
+	Image                string   `json:"image"`
+	GithubURL            string   `json:"githubUrl"`
+	InstagramURL         string   `json:"instagramUrl"`
+	LinkedInURL          string   `json:"linkedinUrl"`
+	Visibility           string   `json:"visibility"`
+	Languages            []string `json:"languages"`
+	Interests            []string `json:"interests"`
+	PinnedSnippetID      *string  `json:"pinnedSnippetId"` // MVP v1.1
+	PublicProfileEnabled *bool    `json:"publicProfileEnabled"`
+	SearchVisible        *bool    `json:"searchVisible"`
 }
 
 // -- Handlers -- //
@@ -311,8 +330,18 @@ func UpdateProfile(c *gin.Context) {
 	if input.InstagramURL != "" {
 		user.InstagramURL = input.InstagramURL
 	}
+	if input.LinkedInURL != "" {
+		user.LinkedInURL = input.LinkedInURL
+	}
 	if input.Visibility != "" {
 		user.Visibility = models.Visibility(input.Visibility)
+	}
+
+	if len(input.Languages) > 0 {
+		user.PreferredLanguages = input.Languages
+	}
+	if len(input.Interests) > 0 {
+		user.Interests = input.Interests
 	}
 	if input.PinnedSnippetID != nil {
 		user.PinnedSnippetID = input.PinnedSnippetID
@@ -384,6 +413,7 @@ func GetPublicProfile(c *gin.Context) {
 		"trustScore":           user.TrustScore,
 		"githubUrl":            user.GithubURL,
 		"instagramUrl":         user.InstagramURL,
+		"linkedinUrl":          user.LinkedInURL,
 		"createdAt":            user.CreatedAt,
 		"pinnedSnippet":        user.PinnedSnippet,
 		"isBlocked":            user.IsBlocked, // Keep for frontend logic? Actually probably hide.
@@ -391,6 +421,8 @@ func GetPublicProfile(c *gin.Context) {
 		"snippetCount":         snippetCount,
 		"contestCount":         contestCount,
 		"topSnippets":          topSnippets,
+		"preferredLanguages":   user.PreferredLanguages,
+		"interests":            user.Interests,
 		"publicProfileEnabled": user.PublicProfileEnabled, // public needs to know? sure.
 	}
 
@@ -414,7 +446,7 @@ func ListCommunityUsers(c *gin.Context) {
 	limit := 20
 	offset := (page - 1) * limit
 
-	query := database.DB.Model(&models.User{}).Where("search_visible = ?", true)
+	query := database.DB.Model(&models.User{}).Where("search_visible = ? AND onboarding_completed = ?", true, true)
 
 	if search != "" {
 		searchLike := utils.SanitizeSearchQuery(search)
@@ -424,9 +456,9 @@ func ListCommunityUsers(c *gin.Context) {
 	// Sorting
 	switch sort {
 	case "active":
-		// approximation: created_at or recent activity?
-		// for now, recently joined
-		query = query.Order("created_at desc")
+		// approximation: createdAt or recent activity?
+		// for now, recently joined (using quoted createdAt for Postgres camelCase)
+		query = query.Order("\"createdAt\" desc")
 	case "trust":
 		query = query.Order("trust_score desc")
 	case "snippets":
@@ -618,7 +650,7 @@ func GetBadges(c *gin.Context) {
 	// Count Rank for Early Adopter (First 1000)
 	var userJoinRank int64
 	database.DB.Model(&models.User{}).
-		Where("created_at <= (SELECT created_at FROM users WHERE id = ?)", user.ID).
+		Where("\"createdAt\" <= (SELECT \"createdAt\" FROM \"User\" WHERE id = ?)", user.ID).
 		Count(&userJoinRank)
 	earlyAdopterProgress := int64(0)
 	if userJoinRank <= 1000 {

@@ -92,4 +92,8 @@ func RegisterAdminRoutes(rg *gin.RouterGroup) {
 	admin.POST("/feedback/:id/hide", handlers.AdminHideFeedback)
 	admin.POST("/feedback/:id/pin", handlers.AdminPinFeedback)
 	admin.POST("/feedback/:id/convert", handlers.AdminConvertToChangelog)
+
+	// Avatar Management
+	admin.POST("/avatars", handlers.AdminAddAvatarSeed)
+	admin.DELETE("/avatars/:id", handlers.AdminDeleteAvatarSeed)
 }

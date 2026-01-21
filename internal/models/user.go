@@ -3,6 +3,7 @@ package models
 import (
 	"time"
 
+	"github.com/lib/pq"
 	"gorm.io/gorm"
 )
 
@@ -35,22 +36,24 @@ type User struct {
 	Bio           string     `json:"bio"`
 	GithubURL     string     `gorm:"column:githubUrl" json:"githubUrl"`
 	InstagramURL  string     `gorm:"column:instagramUrl" json:"instagramUrl"`
+	LinkedInURL   string     `gorm:"column:linkedinUrl" json:"linkedinUrl"`
 	IsBlocked     bool       `gorm:"default:false" json:"isBlocked"`
 
 	// Enums stored as strings
 	Role       Role       `gorm:"type:text;default:'USER'" json:"role"`
 	Visibility Visibility `gorm:"type:text;default:'PUBLIC'" json:"visibility"`
 
-	OnboardingCompleted bool    `gorm:"default:false" json:"onboardingCompleted"`
-	PreferredLanguages  *string `gorm:"type:text[]" json:"preferredLanguages"` // Postgres Array
-	Interests           *string `gorm:"type:text[]" json:"interests"`          // Postgres Array
+	OnboardingCompleted bool           `gorm:"default:false" json:"onboardingCompleted"`
+	PreferredLanguages  pq.StringArray `gorm:"type:text[]" json:"preferredLanguages"` // Postgres Array
+	Interests           pq.StringArray `gorm:"type:text[]" json:"interests"`          // Postgres Array
+	IsModerator         bool           `gorm:"default:false" json:"isModerator"`
 
 	// Anti-Cheat (MVP)
 	TrustScore int `gorm:"default:100" json:"trustScore"`
 
 	// Arrays (Postgres String Array)
-	SelectedPublicSnippetIds *string `gorm:"type:text[]" json:"selectedPublicSnippetIds"` // GORM might need custom handling for arrays or simpler approach
-	PurchasedComponentIds    *string `gorm:"type:text[]" json:"purchasedComponentIds"`
+	SelectedPublicSnippetIds pq.StringArray `gorm:"type:text[]" json:"selectedPublicSnippetIds"` // GORM might need custom handling for arrays or simpler approach
+	PurchasedComponentIds    pq.StringArray `gorm:"type:text[]" json:"purchasedComponentIds"`
 
 	// MVP v1.1: Profile Customization
 	PinnedSnippetID *string  `gorm:"column:pinnedSnippetId" json:"pinnedSnippetId"`
