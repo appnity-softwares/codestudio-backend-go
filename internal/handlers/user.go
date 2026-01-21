@@ -180,6 +180,10 @@ func CompleteOnboarding(c *gin.Context) {
 
 	// Double check username uniqueness if changed
 	if input.Username != user.Username {
+		if !utils.ValidateUsername(input.Username) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid username format"})
+			return
+		}
 		var count int64
 		database.DB.Model(&models.User{}).Where("username = ? AND id != ?", input.Username, userID).Count(&count)
 		if count > 0 {
@@ -288,6 +292,10 @@ func UpdateProfile(c *gin.Context) {
 
 	// Username Change Logic (Limit: 2 changes per 90 days)
 	if input.Username != "" && input.Username != user.Username {
+		if !utils.ValidateUsername(input.Username) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid username format"})
+			return
+		}
 		// Verify uniqueness
 		var count int64
 		database.DB.Model(&models.User{}).Where("username = ?", input.Username).Count(&count)

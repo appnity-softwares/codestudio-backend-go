@@ -68,8 +68,12 @@ func GetAvatarSeeds(c *gin.Context) {
 	// Default seeds if none in DB
 	if len(seeds) == 0 {
 		defaults := []string{"Felix", "Aneka", "Mason", "Jude", "Clara", "Lilly", "Max", "Toby"}
-		for _, s := range defaults {
-			seeds = append(seeds, models.AvatarSeed{Seed: s, Style: "avataaars"})
+		for i, s := range defaults {
+			seeds = append(seeds, models.AvatarSeed{
+				ID:    uint(i + 1),
+				Seed:  s,
+				Style: "avataaars",
+			})
 		}
 	}
 

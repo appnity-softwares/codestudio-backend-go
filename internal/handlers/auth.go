@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 	"unicode"
 
@@ -77,6 +78,12 @@ func Register(c *gin.Context) {
 	// Validate Password Strength
 	if err := validatePasswordStrength(input.Password); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Validate Username
+	if !utils.ValidateUsername(input.Username) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Username must be 3-30 characters and contain only letters, numbers, underscores, or hyphens (no spaces or @ allowed)"})
 		return
 	}
 
@@ -339,13 +346,33 @@ func handleOAuthLogin(c *gin.Context, email, name, image string) {
 		}
 
 		// 2. Register new user
+		// Generate better username from name or email prefix
+		baseUsername := ""
+		if name != "" {
+			baseUsername = strings.ToLower(strings.ReplaceAll(name, " ", "_"))
+		} else {
+			baseUsername = strings.Split(email, "@")[0]
+		}
+
+		// Clean username
+		cleaned := ""
+		for _, r := range baseUsername {
+			if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-' {
+				cleaned += string(r)
+			}
+		}
+		if cleaned == "" {
+			cleaned = "user"
+		}
+
+		now := time.Now()
 		user = models.User{
-			ID:       uuid.New().String(),
-			Email:    email,
-			Name:     name,
-			Image:    image,
-			Username: email, // Temporary username
-			// Accounts would link here ideally
+			ID:            uuid.New().String(),
+			Email:         email,
+			EmailVerified: &now,
+			Name:          name,
+			Image:         image,
+			Username:      cleaned + "_" + uuid.New().String()[:4], // Ensure uniqueness
 		}
 		if createErr := database.DB.Create(&user).Error; createErr != nil {
 			logger.Error().Err(createErr).Msg("Failed to create user during OAuth")

@@ -14,6 +14,13 @@ func RegisterAdminRoutes(rg *gin.RouterGroup) {
 	// Dashboard (Generic Staff Access)
 	admin.GET("/dashboard", middleware.StaffOnly(""), handlers.AdminGetDashboard)
 
+	// Snippet Management
+	snippets := admin.Group("/snippets")
+	snippets.Use(middleware.StaffOnly("CanManageSnippets"))
+	{
+		snippets.GET("", handlers.AdminGetSnippets)
+	}
+
 	// User Management
 	users := admin.Group("/users")
 	users.Use(middleware.StaffOnly("CanManageUsers"))
@@ -78,6 +85,7 @@ func RegisterAdminRoutes(rg *gin.RouterGroup) {
 		moderation.POST("/submissions/:id/restore", handlers.AdminRestoreSubmission)
 
 		moderation.POST("/snippets/:id/pin", handlers.AdminPinSnippet)
+		moderation.DELETE("/snippets/:id", handlers.AdminDeleteSnippet)
 
 		// Avatars also usually staff/moderation
 		moderation.POST("/avatars", handlers.AdminAddAvatarSeed)
@@ -103,6 +111,7 @@ func RegisterAdminRoutes(rg *gin.RouterGroup) {
 		// System Settings
 		restricted.GET("/system", handlers.AdminGetSystemSettings)
 		restricted.PUT("/system", handlers.AdminUpdateSystemSettings)
+		restricted.POST("/system/redeploy", handlers.AdminTriggerRedeploy)
 
 		// Analytics (Full)
 		restricted.GET("/analytics/top-snippets", handlers.AdminGetTopSnippets)

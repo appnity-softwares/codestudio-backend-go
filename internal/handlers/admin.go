@@ -1,7 +1,10 @@
 package handlers
 
 import (
+	"fmt"
+	"log"
 	"net/http"
+	"os/exec"
 	"strconv"
 	"time"
 
@@ -268,6 +271,65 @@ func AdminPinSnippet(c *gin.Context) {
 		return
 	}
 	c.JSON(200, gin.H{"message": "Snippet pin status updated", "featured": req.Featured})
+}
+
+// AdminGetSnippets lists snippets for admin/staff
+func AdminGetSnippets(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	search := c.Query("search")
+
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	offset := (page - 1) * limit
+
+	query := database.DB.Model(&models.Snippet{}).Preload("Author")
+
+	if search != "" {
+		searchPattern := "%" + search + "%"
+		query = query.Where("title ILIKE ? OR language ILIKE ?", searchPattern, searchPattern)
+	}
+
+	var total int64
+	query.Count(&total)
+
+	var snippets []models.Snippet
+	query.Order("created_at desc").Offset(offset).Limit(limit).Find(&snippets)
+
+	c.JSON(http.StatusOK, gin.H{
+		"snippets": snippets,
+		"pagination": gin.H{
+			"page":       page,
+			"limit":      limit,
+			"total":      total,
+			"totalPages": (total + int64(limit) - 1) / int64(limit),
+		},
+	})
+}
+
+// AdminDeleteSnippet allows staff to delete any snippet
+func AdminDeleteSnippet(c *gin.Context) {
+	snippetID := c.Param("id")
+	adminID := getAdminID(c)
+
+	var snippet models.Snippet
+	if err := database.DB.First(&snippet, "id = ?", snippetID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Snippet not found"})
+		return
+	}
+
+	if err := database.DB.Delete(&snippet).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete snippet"})
+		return
+	}
+
+	logAdminAction(database.DB, adminID, models.ActionDeleteSnippet, snippetID, "snippet", "Deleted by staff")
+
+	c.JSON(http.StatusOK, gin.H{"message": "Snippet deleted successfully"})
 }
 
 // AdminAdjustTrustScore manually sets a user's trust score with audit logging
@@ -832,4 +894,47 @@ func PublicGetSystemStatus(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"settings": settingsMap})
+}
+
+// AdminTriggerRedeploy executes the redeployment script on the server
+func AdminTriggerRedeploy(c *gin.Context) {
+	adminID := getAdminID(c)
+
+	var req struct {
+		Mode string `json:"mode"` // "backend", "frontend", "all"
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		// Default to 'all' if empty, or error? Let's default to all if valid json but empty field, or error if completely weird.
+		// Actually BindJSON requires body.
+		req.Mode = "all"
+	}
+	if req.Mode == "" {
+		req.Mode = "all"
+	}
+
+	// Double check mode safety
+	if req.Mode != "backend" && req.Mode != "frontend" && req.Mode != "all" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid mode. Use 'backend', 'frontend', or 'all'"})
+		return
+	}
+
+	// Log action before triggering (in case server restarts and we lose log context in memory, but DB is fine)
+	logAdminAction(database.DB, adminID, models.ActionManageSystem, "system", "system", "Triggered Redeploy: "+req.Mode)
+
+	// Trigger async to allow response to be sent
+	go func(mode string) {
+		cmd := exec.Command("/bin/bash", "/var/www/codestudio/redeploy.sh", mode)
+		// We could capture output to a log file or database if needed. For now just log to stdout (server logs)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			log.Printf("❌ Redeploy Failed: %v\nOutput: %s", err, string(output))
+			// Ideally we would update a DB record saying "Deployment Failed"
+		} else {
+			log.Printf("✅ Redeploy Success (%s)\nOutput: %s", mode, string(output))
+		}
+	}(req.Mode)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": fmt.Sprintf("Redeployment triggered for %s. Server may restart shortly.", req.Mode),
+	})
 }
