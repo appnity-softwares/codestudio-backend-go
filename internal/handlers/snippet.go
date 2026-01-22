@@ -27,6 +27,8 @@ type CreateSnippetInput struct {
 	Type           string   `json:"type"`       // MVP v1.1
 	Difficulty     string   `json:"difficulty"` // MVP v1.1
 	Runtime        float64  `json:"runtime"`    // ms
+	ReferenceUrl   string   `json:"referenceUrl"`
+	Status         string   `json:"status"`
 }
 
 type UpdateSnippetInput struct {
@@ -37,6 +39,8 @@ type UpdateSnippetInput struct {
 	Visibility     string   `json:"visibility"`
 	OutputSnapshot string   `json:"outputSnapshot"`
 	PreviewType    string   `json:"previewType"`
+	ReferenceUrl   string   `json:"referenceUrl"`
+	Annotations    string   `json:"annotations"`
 }
 
 // -- Handlers --
@@ -120,6 +124,7 @@ func CreateSnippet(c *gin.Context) {
 		Type:           input.Type,
 		Difficulty:     input.Difficulty,
 		Runtime:        input.Runtime,
+		ReferenceURL:   input.ReferenceUrl,
 	}
 
 	// Default visibility
@@ -127,9 +132,16 @@ func CreateSnippet(c *gin.Context) {
 		snippet.Visibility = "public"
 	}
 
-	// Enforce Draft Status
-	snippet.Status = "DRAFT"
-	snippet.Verified = false
+	// Handle Status (v1.2: allow public direct post)
+	if input.Status != "" {
+		snippet.Status = input.Status
+		if snippet.Status == "PUBLISHED" {
+			snippet.Verified = true
+		}
+	} else {
+		snippet.Status = "DRAFT"
+		snippet.Verified = false
+	}
 	snippet.LastExecutionStatus = ""
 
 	if result := database.DB.Create(&snippet); result.Error != nil {
@@ -212,6 +224,12 @@ func UpdateSnippet(c *gin.Context) {
 	}
 	if input.Visibility != "" {
 		snippet.Visibility = input.Visibility
+	}
+	if input.ReferenceUrl != "" {
+		snippet.ReferenceURL = input.ReferenceUrl
+	}
+	if input.Annotations != "" {
+		snippet.Annotations = input.Annotations
 	}
 
 	database.DB.Save(&snippet)
@@ -417,11 +435,10 @@ func GetFeed(c *gin.Context) {
 
 	switch bucket {
 	case "trending":
-		// Score = (forkCount * 2) + copyCount + viewsCount - (hours_since_post * 0.1)
-		// Using raw SQL for computed ordering
+		// Score = (forkCount * 5) + copyCount * 2 + viewsCount - (hours_since_post * 0.05)
 		query = query.
-			Where("\"createdAt\" > NOW() - INTERVAL '7 days'").
-			Order("(fork_count * 2 + copy_count + views_count - EXTRACT(EPOCH FROM (NOW() - \"createdAt\"))/3600 * 0.1) DESC")
+			Where("\"createdAt\" > NOW() - INTERVAL '30 days'").
+			Order("(fork_count * 5 + copy_count * 2 + views_count - EXTRACT(EPOCH FROM (NOW() - \"createdAt\"))/3600 * 0.05) DESC")
 	case "new":
 		query = query.Order("\"createdAt\" DESC")
 	case "editor":

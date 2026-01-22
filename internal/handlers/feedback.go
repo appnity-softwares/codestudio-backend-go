@@ -272,3 +272,74 @@ func DisagreeFeedback(c *gin.Context) {
 
 	go database.CacheInvalidate("feedback:*")
 }
+
+// UpdateFeedback handles editing existing feedback
+func UpdateFeedback(c *gin.Context) {
+	userID := c.GetString("userId")
+	messageID := c.Param("id")
+
+	var input struct {
+		Content  string                  `json:"content" binding:"required,max=500"`
+		Category models.FeedbackCategory `json:"category"`
+	}
+
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var feedback models.FeedbackMessage
+	if err := database.DB.First(&feedback, "id = ?", messageID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Feedback not found"})
+		return
+	}
+
+	if feedback.UserID != userID && c.GetString("userRole") != "ADMIN" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Unauthorized to edit this feedback"})
+		return
+	}
+
+	if feedback.IsLocked {
+		c.JSON(http.StatusForbidden, gin.H{"error": "This feedback is locked and cannot be edited"})
+		return
+	}
+
+	feedback.Content = input.Content
+	feedback.Category = input.Category
+
+	if err := database.DB.Save(&feedback).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update feedback"})
+		return
+	}
+
+	// Preload user for response
+	database.DB.Preload("User").First(&feedback, "id = ?", feedback.ID)
+
+	go database.CacheInvalidate("feedback:*")
+	c.JSON(http.StatusOK, gin.H{"message": "Feedback updated", "data": feedback})
+}
+
+// DeleteFeedback handles deleting feedback
+func DeleteFeedback(c *gin.Context) {
+	userID := c.GetString("userId")
+	messageID := c.Param("id")
+
+	var feedback models.FeedbackMessage
+	if err := database.DB.First(&feedback, "id = ?", messageID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Feedback not found"})
+		return
+	}
+
+	if feedback.UserID != userID && c.GetString("userRole") != "ADMIN" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Unauthorized to delete this feedback"})
+		return
+	}
+
+	if err := database.DB.Delete(&feedback).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete feedback"})
+		return
+	}
+
+	go database.CacheInvalidate("feedback:*")
+	c.JSON(http.StatusOK, gin.H{"message": "Feedback deleted"})
+}

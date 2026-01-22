@@ -17,6 +17,8 @@ func RegisterFeedbackRoutes(r *gin.RouterGroup) {
 	protected.Use(middleware.AuthMiddleware()) // Strict Auth
 	{
 		protected.POST("", handlers.CreateFeedback)
+		protected.PUT("/:id", handlers.UpdateFeedback)
+		protected.DELETE("/:id", handlers.DeleteFeedback)
 		protected.POST("/:id/react", handlers.ReactFeedback)
 		protected.POST("/:id/disagree", handlers.DisagreeFeedback)
 	}
