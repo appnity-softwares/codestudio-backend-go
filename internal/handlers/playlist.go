@@ -101,12 +101,30 @@ func ListPlaylists(c *gin.Context) {
 	}
 
 	// Only published or if it's the author
-	currentUserID, _ := c.Get("userId")
-	if authorID != currentUserID {
-		query = query.Where("\"isPublished\" = ?", true)
+	// Visibility Logic:
+	// 1. If filtering by specific author:
+	//    - If author is me: Show all.
+	//    - If author is other: Show only published.
+	// 2. If global feed (no author filter):
+	//    - Show published OR my own drafts.
+	currentUserID, hasAuth := c.Get("userId")
+
+	if authorID != "" {
+		// Specific author requested
+		if !hasAuth || authorID != currentUserID {
+			query = query.Where("is_published = ?", true)
+		}
+	} else {
+		// Global feed
+		if hasAuth {
+			query = query.Where("is_published = ? OR \"authorId\" = ?", true, currentUserID)
+		} else {
+			query = query.Where("is_published = ?", true)
+		}
 	}
 
-	if err := query.Order("created_at DESC").Find(&playlists).Error; err != nil {
+	// Model has column:createdAt tag, so we must quote it to match case sensitivity
+	if err := query.Order("\"createdAt\" DESC").Find(&playlists).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch playlists"})
 		return
 	}
