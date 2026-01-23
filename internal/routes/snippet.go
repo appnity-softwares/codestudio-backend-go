@@ -11,6 +11,7 @@ func RegisterSnippetRoutes(r gin.IRouter) {
 	{
 		snippets.GET("", middleware.OptionalAuthMiddleware(), handlers.ListSnippets)
 		snippets.GET("/:id", middleware.OptionalAuthMiddleware(), handlers.GetSnippet)
+		snippets.GET("/:id/similar", handlers.GetSimilarSnippets)
 		snippets.POST("/:id/run", middleware.OptionalAuthMiddleware(), handlers.RunSnippet)
 		snippets.POST("/execute", middleware.ExecuteRateLimit(), handlers.ExecuteCode)
 

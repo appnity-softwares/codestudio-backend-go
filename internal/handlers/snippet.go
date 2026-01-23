@@ -29,6 +29,7 @@ type CreateSnippetInput struct {
 	Runtime        float64  `json:"runtime"`    // ms
 	ReferenceUrl   string   `json:"referenceUrl"`
 	Status         string   `json:"status"`
+	StdinHistory   string   `json:"stdinHistory"`
 }
 
 type UpdateSnippetInput struct {
@@ -41,6 +42,7 @@ type UpdateSnippetInput struct {
 	PreviewType    string   `json:"previewType"`
 	ReferenceUrl   string   `json:"referenceUrl"`
 	Annotations    string   `json:"annotations"`
+	StdinHistory   string   `json:"stdinHistory"`
 }
 
 // -- Handlers --
@@ -56,8 +58,18 @@ func ListSnippets(c *gin.Context) {
 	// Filtering
 	search := c.Query("search")
 	if search != "" {
-		searchLike := utils.SanitizeSearchQuery(search)
-		query = query.Where("title ILIKE ? OR description ILIKE ?", searchLike, searchLike)
+		// Smart Search: Breakdown query into terms to simulate natural language understanding
+		terms := strings.Fields(search)
+		if len(terms) > 0 {
+			var subQueries []string
+			var args []interface{}
+			for _, term := range terms {
+				searchLike := "%" + term + "%"
+				subQueries = append(subQueries, "(title ILIKE ? OR description ILIKE ? OR ? = ANY(tags))")
+				args = append(args, searchLike, searchLike, term)
+			}
+			query = query.Where(strings.Join(subQueries, " OR "), args...)
+		}
 	}
 
 	lang := c.Query("language")
@@ -125,6 +137,7 @@ func CreateSnippet(c *gin.Context) {
 		Difficulty:     input.Difficulty,
 		Runtime:        input.Runtime,
 		ReferenceURL:   input.ReferenceUrl,
+		StdinHistory:   input.StdinHistory,
 	}
 
 	// Default visibility
@@ -151,6 +164,11 @@ func CreateSnippet(c *gin.Context) {
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": result.Error.Error()})
 		return
+	}
+
+	// Reward XP for creating a snippet (if public)
+	if snippet.Visibility == "public" {
+		database.DB.Model(&models.User{}).Where("id = ?", userID.(string)).Update("xp", gorm.Expr("xp + ?", 50))
 	}
 
 	// Check for Badges
@@ -230,6 +248,9 @@ func UpdateSnippet(c *gin.Context) {
 	}
 	if input.Annotations != "" {
 		snippet.Annotations = input.Annotations
+	}
+	if input.StdinHistory != "" {
+		snippet.StdinHistory = input.StdinHistory
 	}
 
 	database.DB.Save(&snippet)
@@ -540,6 +561,12 @@ func ForkSnippet(c *gin.Context) {
 
 	tx.Commit()
 
+	// Reward XP for forking
+	// Forker gets 25 XP
+	database.DB.Model(&models.User{}).Where("id = ?", userID.(string)).Update("xp", gorm.Expr("xp + ?", 25))
+	// Original author gets 10 XP
+	database.DB.Model(&models.User{}).Where("id = ?", source.AuthorID).Update("xp", gorm.Expr("xp + ?", 10))
+
 	// Preload author for response
 	database.DB.Preload("Author").First(&fork, "id = ?", fork.ID)
 
@@ -642,4 +669,28 @@ func RecordSnippetView(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "View recorded"})
+}
+
+// GetSimilarSnippets handles GET /snippets/:id/similar
+func GetSimilarSnippets(c *gin.Context) {
+	id := c.Param("id")
+	var snippet models.Snippet
+	if err := database.DB.First(&snippet, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Snippet not found"})
+		return
+	}
+
+	var similar []models.Snippet
+	// Semantic Similarity: Same language or overlapping tags
+	query := database.DB.Model(&models.Snippet{}).Preload("Author").
+		Where("id <> ? AND (language = ? OR tags && ?)", id, snippet.Language, snippet.Tags).
+		Order("views_count DESC").
+		Limit(5)
+
+	if err := query.Find(&similar).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch similar snippets"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"snippets": similar})
 }

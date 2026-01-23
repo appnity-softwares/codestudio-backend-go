@@ -31,10 +31,12 @@ func RegisterUserRoutes(r gin.IRouter) {
 
 		// Onboarding (Authenticated)
 		users.POST("/onboarding", middleware.AuthMiddleware(), handlers.CompleteOnboarding)
+		users.POST("/spend-xp", middleware.AuthMiddleware(), handlers.SpendXP)
 	}
 
 	// Community & Public Profile Routes (Root under /api usually)
 	r.GET("/community/users", middleware.OptionalAuthMiddleware(), handlers.ListCommunityUsers)
 	r.GET("/community/search-suggestions", handlers.SearchSuggestions)
 	r.GET("/public/users/:username", handlers.GetPublicProfile)
+	r.GET("/leaderboard/global", handlers.GetGlobalLeaderboard)
 }

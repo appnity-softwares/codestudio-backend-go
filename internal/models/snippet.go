@@ -44,7 +44,8 @@ type Snippet struct {
 	Verified            bool   `gorm:"default:false" json:"verified"`
 	LastExecutionStatus string `gorm:"column:lastExecutionStatus" json:"lastExecutionStatus"` // SUCCESS, FAILURE
 	LastExecutionOutput string `gorm:"type:text;column:lastExecutionOutput" json:"lastExecutionOutput"`
-	Annotations         string `gorm:"type:text" json:"annotations"` // JSON string of line annotations
+	Annotations         string `gorm:"type:text" json:"annotations"`  // JSON string of line annotations
+	StdinHistory        string `gorm:"type:text" json:"stdinHistory"` // JSON string of interactive session
 
 	// Relations
 	AuthorID string `gorm:"column:authorId" json:"authorId"`

@@ -463,7 +463,12 @@ func ListCommunityUsers(c *gin.Context) {
 
 	if search != "" {
 		searchLike := utils.SanitizeSearchQuery(search)
-		query = query.Where("username ILIKE ? OR name ILIKE ?", searchLike, searchLike)
+		query = query.Where("username ILIKE ? OR name ILIKE ? OR city ILIKE ?", searchLike, searchLike, searchLike)
+	}
+
+	city := c.Query("city")
+	if city != "" {
+		query = query.Where("city ILIKE ?", city)
 	}
 
 	// Sorting
@@ -741,6 +746,13 @@ func GetBadges(c *gin.Context) {
 			currentProgress = earlyAdopterProgress
 		}
 
+		// Dynamic Type assignment for refinement
+		if badge.Condition == "early_adopter" || badge.Condition == "contest_winner" || badge.Condition == "snippet_master" || badge.Condition == "25_snippets" {
+			badge.Type = models.BadgeType3D
+		} else {
+			badge.Type = models.BadgeType2D
+		}
+
 		// Logic Override for "Early Adopter" (Threshold 0)
 		isUnlocked := exists && (badge.Threshold == 0 || ub.Progress >= badge.Threshold)
 
@@ -810,7 +822,7 @@ func GetBadges(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"badges": responseBadges,
-		"influence": gin.H{
+		"authority": gin.H{
 			"score": influence,
 			"rank":  rank,
 			"breakdown": gin.H{
@@ -821,4 +833,82 @@ func GetBadges(c *gin.Context) {
 			},
 		},
 	})
+}
+
+// GetGlobalLeaderboard returns top users by XP
+func GetGlobalLeaderboard(c *gin.Context) {
+	var users []models.User
+	// Order by XP descending, limit to 20
+	// We only show users with XP > 0 and who completed onboarding
+	if err := database.DB.Model(&models.User{}).
+		Where("xp > 0 AND onboarding_completed = ?", true).
+		Order("xp DESC, \"createdAt\" ASC").
+		Limit(20).
+		Find(&users).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch leaderboard"})
+		return
+	}
+
+	// Sanitize output
+	var safeUsers []gin.H
+	for i, u := range users {
+		safeUsers = append(safeUsers, gin.H{
+			"rank":     i + 1,
+			"username": u.Username,
+			"name":     u.Name,
+			"image":    u.Image,
+			"xp":       u.XP,
+			"id":       u.ID,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{"leaderboard": safeUsers})
+}
+
+// SpendXP handles POST /users/spend-xp
+func SpendXP(c *gin.Context) {
+	userId, exists := c.Get("userId")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	var input struct {
+		ItemID string `json:"itemId" binding:"required"`
+		Amount int    `json:"amount" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var user models.User
+	if err := database.DB.First(&user, "id = ?", userId).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	if user.XP < input.Amount {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Insufficient XP balance"})
+		return
+	}
+
+	// Check if already purchased
+	for _, id := range user.PurchasedComponentIds {
+		if id == input.ItemID {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Item already unlocked"})
+			return
+		}
+	}
+
+	user.XP -= input.Amount
+	user.PurchasedComponentIds = append(user.PurchasedComponentIds, input.ItemID)
+
+	if err := database.DB.Save(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to complete transaction"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Item unlocked successfully", "xp": user.XP, "purchasedIds": user.PurchasedComponentIds})
 }

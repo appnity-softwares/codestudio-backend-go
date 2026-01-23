@@ -72,6 +72,8 @@ func main() {
 		&models.FeedbackDisagree{},
 		&models.AvatarSeed{},
 		&models.RolePermission{},
+		&models.Playlist{},
+		&models.PlaylistSnippet{},
 	}
 
 	for _, m := range tableModels {
@@ -136,6 +138,7 @@ func main() {
 		routes.RegisterAdminRoutes(api)          // Admin routes bypass maintenance
 		routes.RegisterPracticeRoutes(protected) // v1.2: Practice Arena
 		routes.RegisterFeedbackRoutes(api)       // Feedback Wall Routes (Hybrid Public/Protected)
+		routes.RegisterPlaylistRoutes(protected) // v1.3: Playlist Tracks
 	}
 
 	// Enhanced health check with DB and Redis status

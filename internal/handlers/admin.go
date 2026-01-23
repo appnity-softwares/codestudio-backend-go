@@ -852,12 +852,24 @@ func AdminUpdateSystemSettings(c *gin.Context) {
 
 	// Validate key
 	validKeys := map[string]bool{
-		models.SettingMaintenanceMode:    true,
-		models.SettingSubmissionsEnabled: true,
-		models.SettingSnippetsEnabled:    true,
-		models.SettingContestsEnabled:    true,
-		models.SettingRegistrationOpen:   true,
-		models.SettingMaintenanceETA:     true,
+		models.SettingMaintenanceMode:          true,
+		models.SettingSubmissionsEnabled:       true,
+		models.SettingSnippetsEnabled:          true,
+		models.SettingContestsEnabled:          true,
+		models.SettingRegistrationOpen:         true,
+		models.SettingMaintenanceETA:           true,
+		models.SettingFeatureSidebarXPStore:    true,
+		models.SettingFeatureSidebarTrophyRoom: true,
+		models.SettingFeatureSidebarPractice:   true,
+		models.SettingFeatureSidebarFeedback:   true,
+		models.SettingFeatureSidebarRoadmaps:   true,
+		models.SettingFeatureSidebarCommunity:  true,
+		models.SettingFeatureInterfaceEngine:   true,
+		models.SettingBannerVisible:            true,
+		models.SettingBannerTitle:              true,
+		models.SettingBannerBadge:              true,
+		models.SettingBannerContent:            true,
+		models.SettingBannerLink:               true,
 	}
 	if !validKeys[req.Key] {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid setting key"})
@@ -889,6 +901,18 @@ func PublicGetSystemStatus(c *gin.Context) {
 	database.DB.Where("key IN ?", []string{
 		models.SettingMaintenanceMode,
 		models.SettingMaintenanceETA,
+		models.SettingFeatureSidebarXPStore,
+		models.SettingFeatureSidebarTrophyRoom,
+		models.SettingFeatureSidebarPractice,
+		models.SettingFeatureSidebarFeedback,
+		models.SettingFeatureSidebarRoadmaps,
+		models.SettingFeatureSidebarCommunity,
+		models.SettingFeatureInterfaceEngine,
+		models.SettingBannerVisible,
+		models.SettingBannerTitle,
+		models.SettingBannerBadge,
+		models.SettingBannerContent,
+		models.SettingBannerLink,
 	}).Find(&settings)
 
 	settingsMap := make(map[string]string)

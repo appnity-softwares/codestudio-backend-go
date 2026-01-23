@@ -60,6 +60,10 @@ type User struct {
 	PinnedSnippetID *string  `gorm:"column:pinnedSnippetId" json:"pinnedSnippetId"`
 	PinnedSnippet   *Snippet `gorm:"foreignKey:PinnedSnippetID" json:"pinnedSnippet,omitempty"`
 
+	// v1.3: Engagement & Social
+	City         string         `json:"city"`
+	Endorsements pq.StringArray `gorm:"type:text[]" json:"endorsements"`
+
 	// Identity Management
 	UsernameChangeCount  int       `gorm:"default:0" json:"usernameChangeCount"`
 	LastUsernameChangeAt time.Time `json:"lastUsernameChangeAt"`
@@ -73,6 +77,7 @@ type User struct {
 	WrappedForkCount    int `gorm:"default:0;column:fork_count" json:"forkCount"`
 	WrappedViewCount    int `gorm:"default:0;column:view_count" json:"viewCount"`
 	WrappedContestCount int `gorm:"default:0;column:contest_count" json:"contestCount"`
+	XP                  int `gorm:"default:0" json:"xp"`
 
 	ResetToken       string    `json:"-"`
 	ResetTokenExpiry time.Time `json:"-"`

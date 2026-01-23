@@ -11,7 +11,7 @@ import (
 // ListChangelog returns all changelog entries (public - published only)
 func ListChangelog(c *gin.Context) {
 	var entries []models.ChangelogEntry
-	if err := database.DB.Where("is_published = ?", true).Order("released_at desc").Find(&entries).Error; err != nil {
+	if err := database.DB.Where("is_published = ?", true).Order("\"order\" ASC, released_at DESC").Find(&entries).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch changelog"})
 		return
 	}

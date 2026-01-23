@@ -121,6 +121,7 @@ func RegisterAdminRoutes(rg *gin.RouterGroup) {
 		restricted.POST("/changelog", handlers.AdminCreateChangelog)
 		restricted.PUT("/changelog/:id", handlers.AdminUpdateChangelog)
 		restricted.DELETE("/changelog/:id", handlers.AdminDeleteChangelog)
+		restricted.POST("/changelog/reorder", handlers.AdminReorderChangelogs)
 
 		// Feedback
 		restricted.GET("/feedback", handlers.AdminListFeedback)

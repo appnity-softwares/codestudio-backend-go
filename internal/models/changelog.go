@@ -15,6 +15,7 @@ type ChangelogEntry struct {
 	ReleaseType string     `json:"releaseType"`                  // FEATURE, FIX, SECURITY, BREAKING
 	IsPublished bool       `gorm:"default:false;index" json:"isPublished"`
 	ReleasedAt  *time.Time `gorm:"index" json:"releasedAt"`
+	Order       int        `gorm:"default:0" json:"order"`
 	CreatedAt   time.Time  `json:"createdAt"`
 	CreatedBy   string     `json:"createdBy"` // Admin ID
 	// Legacy support (optional, can remove if we migrate data)

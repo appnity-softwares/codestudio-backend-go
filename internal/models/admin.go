@@ -72,6 +72,22 @@ const (
 	SettingContestsEnabled    = "contests_enabled"
 	SettingRegistrationOpen   = "registration_open"
 	SettingMaintenanceETA     = "maintenance_eta"
+
+	// Feature Flags (v1.3)
+	SettingFeatureSidebarXPStore    = "feature_sidebar_xp_store"
+	SettingFeatureSidebarTrophyRoom = "feature_sidebar_trophy_room"
+	SettingFeatureSidebarPractice   = "feature_sidebar_practice"
+	SettingFeatureSidebarFeedback   = "feature_sidebar_feedback"
+	SettingFeatureSidebarRoadmaps   = "feature_sidebar_roadmaps"
+	SettingFeatureSidebarCommunity  = "feature_sidebar_community"
+	SettingFeatureInterfaceEngine   = "feature_interface_engine"
+
+	// System Banner
+	SettingBannerVisible = "system_banner_visible"
+	SettingBannerTitle   = "system_banner_title"
+	SettingBannerBadge   = "system_banner_badge"
+	SettingBannerContent = "system_banner_content" // JSON or Text
+	SettingBannerLink    = "system_banner_link"
 )
 
 // AdminAuditLog extends AdminAction with IP tracking (used for detailed audit)
