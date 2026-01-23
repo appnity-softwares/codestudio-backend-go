@@ -43,6 +43,7 @@ type UpdateSnippetInput struct {
 	ReferenceUrl   string   `json:"referenceUrl"`
 	Annotations    string   `json:"annotations"`
 	StdinHistory   string   `json:"stdinHistory"`
+	Status         string   `json:"status"`
 }
 
 // -- Handlers --
@@ -146,16 +147,20 @@ func CreateSnippet(c *gin.Context) {
 	}
 
 	// Handle Status (v1.2: allow public direct post)
+	// Handle Status (v1.2: allow public direct post)
 	if input.Status != "" {
 		snippet.Status = input.Status
 		if snippet.Status == "PUBLISHED" {
 			snippet.Verified = true
+			snippet.LastExecutionStatus = "SUCCESS"
+		} else {
+			snippet.LastExecutionStatus = ""
 		}
 	} else {
 		snippet.Status = "DRAFT"
 		snippet.Verified = false
+		snippet.LastExecutionStatus = ""
 	}
-	snippet.LastExecutionStatus = ""
 
 	if result := database.DB.Create(&snippet); result.Error != nil {
 		if strings.Contains(result.Error.Error(), "duplicate key value violates unique constraint") {
@@ -226,6 +231,14 @@ func UpdateSnippet(c *gin.Context) {
 		snippet.Verified = false
 		snippet.Status = "DRAFT"
 		snippet.LastExecutionStatus = ""
+	}
+
+	if input.Status != "" {
+		snippet.Status = input.Status
+		if snippet.Status == "PUBLISHED" {
+			snippet.Verified = true
+			snippet.LastExecutionStatus = "SUCCESS"
+		}
 	}
 
 	snippet.Title = input.Title
