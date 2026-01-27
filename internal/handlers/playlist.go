@@ -79,7 +79,25 @@ func GetPlaylist(c *gin.Context) {
 	// Increment views
 	database.DB.Model(&playlist).UpdateColumn("views_count", gorm.Expr("views_count + ?", 1))
 
-	c.JSON(http.StatusOK, gin.H{"playlist": playlist})
+	// Check progress if authenticated
+	currentUserID, exists := c.Get("userId")
+	completedCount := 0
+	if exists {
+		for i, item := range playlist.Items {
+			var view models.EntityView
+			if err := database.DB.Where("user_id = ? AND entity_type = ? AND entity_id = ?",
+				currentUserID.(string), models.EntityTypeSnippet, item.SnippetID).First(&view).Error; err == nil {
+				playlist.Items[i].IsCompleted = true
+				completedCount++
+			}
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"playlist":       playlist,
+		"completedCount": completedCount,
+		"totalCount":     len(playlist.Items),
+	})
 }
 
 // ListPlaylists handles GET /playlists
@@ -298,4 +316,74 @@ func ClaimEndorsement(c *gin.Context) {
 		"xp":           user.XP,
 		"endorsements": user.Endorsements,
 	})
+}
+
+// UpdatePlaylist handles PUT /playlists/:id
+func UpdatePlaylist(c *gin.Context) {
+	id := c.Param("id")
+	userID, _ := c.Get("userId")
+
+	var playlist models.Playlist
+	if err := database.DB.First(&playlist, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Playlist not found"})
+		return
+	}
+
+	if playlist.AuthorID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	var input UpdatePlaylistInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	updates := make(map[string]interface{})
+	if input.Title != "" {
+		updates["title"] = input.Title
+	}
+	if input.Description != "" {
+		updates["description"] = input.Description
+	}
+	if input.Thumbnail != "" {
+		updates["thumbnail"] = input.Thumbnail
+	}
+	if input.Difficulty != "" {
+		updates["difficulty"] = input.Difficulty
+	}
+	updates["is_published"] = input.IsPublished
+
+	if err := database.DB.Model(&playlist).Updates(updates).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update playlist"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"playlist": playlist})
+}
+
+// RemoveSnippetFromPlaylist handles DELETE /playlists/:id/snippets/:snippetId
+func RemoveSnippetFromPlaylist(c *gin.Context) {
+	playlistID := c.Param("id")
+	snippetID := c.Param("snippetId")
+	userID, _ := c.Get("userId")
+
+	var playlist models.Playlist
+	if err := database.DB.First(&playlist, "id = ?", playlistID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Playlist not found"})
+		return
+	}
+
+	if playlist.AuthorID != userID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	if err := database.DB.Where("playlist_id = ? AND snippet_id = ?", playlistID, snippetID).Delete(&models.PlaylistSnippet{}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to remove snippet"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Snippet removed from track"})
 }

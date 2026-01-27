@@ -117,4 +117,8 @@ type DashboardMetrics struct {
 	TotalSubmissions   int64 `json:"totalSubmissions"`
 	PendingSubmissions int64 `json:"pendingSubmissions"`
 	SuspendedUsers     int64 `json:"suspendedUsers"`
+
+	// v1.3 Enhanced Metrics
+	NewSnippetsToday      int64   `json:"newSnippetsToday"`
+	SubmissionSuccessRate float64 `json:"submissionSuccessRate"`
 }

@@ -373,6 +373,47 @@ func AdminAdjustTrustScore(c *gin.Context) {
 	c.JSON(200, gin.H{"message": "Trust score updated", "trustScore": req.TrustScore})
 }
 
+// AdminGrantUserXP allows admins to manually grant or deduct XP
+func AdminGrantUserXP(c *gin.Context) {
+	userID := c.Param("id")
+	adminID := getAdminID(c)
+
+	var req struct {
+		Amount int    `json:"amount"` // Positive to grant, negative to deduct
+		Reason string `json:"reason"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		// Update User XP
+		if err := tx.Model(&models.User{}).Where("id = ?", userID).
+			Update("xp", gorm.Expr("GREATEST(xp + ?, 0)", req.Amount)).Error; err != nil {
+			return err
+		}
+
+		// Log Action
+		action := "Granted " + strconv.Itoa(req.Amount) + " XP"
+		if req.Amount < 0 {
+			action = "Deducted " + strconv.Itoa(-req.Amount) + " XP"
+		}
+
+		// Ideally we should also insert into an XP Ledger/Transaction table if we have one.
+		// For now, Admin Action Log is sufficient for audit.
+
+		return logAdminAction(tx, adminID, models.ActionUpdateUser, userID, "user", action+": "+req.Reason)
+	})
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "XP updated successfully"})
+}
+
 // ============================================
 // DASHBOARD METRICS
 // ============================================
@@ -420,6 +461,16 @@ func AdminGetDashboard(c *gin.Context) {
 		Where("lifted_at IS NULL AND (expires_at IS NULL OR expires_at > ?)", time.Now()).
 		Distinct("user_id").
 		Count(&metrics.SuspendedUsers)
+
+	// v1.3: Enhanced Metrics
+	database.DB.Model(&models.Snippet{}).Where("created_at >= ?", today).Count(&metrics.NewSnippetsToday)
+
+	var totalSubs, acceptedSubs int64
+	database.DB.Model(&models.Submission{}).Count(&totalSubs)
+	if totalSubs > 0 {
+		database.DB.Model(&models.Submission{}).Where("status = ?", "ACCEPTED").Count(&acceptedSubs)
+		metrics.SubmissionSuccessRate = float64(acceptedSubs) / float64(totalSubs)
+	}
 
 	c.JSON(http.StatusOK, gin.H{"metrics": metrics})
 }

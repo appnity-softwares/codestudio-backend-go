@@ -33,8 +33,18 @@ func RegisterAdminRoutes(rg *gin.RouterGroup) {
 		users.POST("/:id/unsuspend", handlers.AdminUnsuspendUser)
 		users.POST("/:id/ban-contest", handlers.AdminBanContest)
 		users.POST("/:id/trust", handlers.AdminAdjustTrustScore)
+		users.POST("/:id/grant-xp", handlers.AdminGrantUserXP)
 		users.PUT("/:id", handlers.AdminUpdateUser)
 		users.DELETE("/:id", handlers.AdminDeleteUser)
+	}
+
+	// Roadmap Management (New V1.3)
+	roadmaps := admin.Group("/roadmaps")
+	roadmaps.Use(middleware.StaffOnly("CanManageSnippets")) // Or new permission
+	{
+		roadmaps.GET("", handlers.AdminListRoadmaps)
+		roadmaps.POST("/:id/verify", handlers.AdminVerifyRoadmap)
+		roadmaps.DELETE("/:id", handlers.AdminDeleteRoadmap)
 	}
 
 	// Contest & Problem Management

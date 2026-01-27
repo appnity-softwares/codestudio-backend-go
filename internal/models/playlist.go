@@ -26,16 +26,19 @@ type Playlist struct {
 	ViewsCount  int  `gorm:"default:0" json:"viewsCount"`
 
 	// v1.3: Certifications
+	// v1.3: Certifications
 	IsVerified        bool   `gorm:"default:false" json:"isVerified"`
 	AwardsEndorsement string `json:"awardsEndorsement"`
+	CompletionBonusXP int    `gorm:"default:0" json:"completionBonusXP"`
 }
 
 type PlaylistSnippet struct {
-	ID         string  `gorm:"primaryKey;type:text" json:"id"`
-	PlaylistID string  `gorm:"index" json:"playlistId"`
-	SnippetID  string  `json:"snippetId"`
-	Snippet    Snippet `gorm:"foreignKey:SnippetID" json:"snippet"`
-	Order      int     `json:"order"`
+	ID          string  `gorm:"primaryKey;type:text" json:"id"`
+	PlaylistID  string  `gorm:"index" json:"playlistId"`
+	SnippetID   string  `json:"snippetId"`
+	Snippet     Snippet `gorm:"foreignKey:SnippetID" json:"snippet"`
+	Order       int     `json:"order"`
+	IsCompleted bool    `gorm:"-" json:"isCompleted"`
 }
 
 func (Playlist) TableName() string {

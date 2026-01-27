@@ -17,8 +17,10 @@ func RegisterPlaylistRoutes(r *gin.RouterGroup) {
 		protected.Use(middleware.AuthMiddleware())
 		{
 			protected.POST("", handlers.CreatePlaylist)
+			protected.PUT("/:id", handlers.UpdatePlaylist)
 			protected.DELETE("/:id", handlers.DeletePlaylist)
 			protected.POST("/:id/snippets", handlers.AddSnippetToPlaylist)
+			protected.DELETE("/:id/snippets/:snippetId", handlers.RemoveSnippetFromPlaylist)
 			protected.POST("/:id/reorder", handlers.ReorderPlaylist)
 			protected.POST("/:id/claim", handlers.ClaimEndorsement)
 		}
