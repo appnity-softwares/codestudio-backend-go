@@ -74,13 +74,18 @@ const (
 	SettingMaintenanceETA     = "maintenance_eta"
 
 	// Feature Flags (v1.3)
-	SettingFeatureSidebarXPStore    = "feature_sidebar_xp_store"
-	SettingFeatureSidebarTrophyRoom = "feature_sidebar_trophy_room"
-	SettingFeatureSidebarPractice   = "feature_sidebar_practice"
-	SettingFeatureSidebarFeedback   = "feature_sidebar_feedback"
-	SettingFeatureSidebarRoadmaps   = "feature_sidebar_roadmaps"
-	SettingFeatureSidebarCommunity  = "feature_sidebar_community"
-	SettingFeatureInterfaceEngine   = "feature_interface_engine"
+	SettingFeatureSidebarXPStore       = "feature_sidebar_xp_store"
+	SettingFeatureSidebarTrophyRoom    = "feature_sidebar_trophy_room"
+	SettingFeatureSidebarPractice      = "feature_sidebar_practice"
+	SettingFeatureSidebarFeedback      = "feature_sidebar_feedback"
+	SettingFeatureSidebarRoadmaps      = "feature_sidebar_roadmaps"
+	SettingFeatureSidebarCommunity     = "feature_sidebar_community"
+	SettingFeatureInterfaceEngine      = "feature_interface_engine"
+	SettingFeatureQuestsEnabled        = "feature_quests_enabled"
+	SettingFeatureSidebarLeaderboard   = "feature_sidebar_leaderboard"
+	SettingFeatureNotificationsEnabled = "feature_notifications_enabled"
+	SettingFeatureSidebarNewBadge      = "feature_sidebar_new_badge"
+	SettingSidebarBadges               = "sidebar_badges"
 
 	// System Banner
 	SettingBannerVisible = "system_banner_visible"
