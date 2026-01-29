@@ -86,6 +86,10 @@ const (
 	SettingFeatureNotificationsEnabled = "feature_notifications_enabled"
 	SettingFeatureSidebarNewBadge      = "feature_sidebar_new_badge"
 	SettingSidebarBadges               = "sidebar_badges"
+	SettingFeatureGithubStats          = "feature_github_stats"
+	SettingFeatureSocialChat           = "feature_social_chat"
+	SettingFeatureSocialFollow         = "feature_social_follow"
+	SettingFeatureSocialFeed           = "feature_social_feed"
 
 	// System Banner
 	SettingBannerVisible = "system_banner_visible"
@@ -102,7 +106,7 @@ type AdminAuditLog struct {
 	ActionType ActionType `json:"actionType"`
 	EntityType string     `json:"entityType"` // "user", "contest", "submission", "snippet", "system"
 	EntityID   string     `json:"entityId"`
-	Metadata   string     `gorm:"type:jsonb" json:"metadata"` // JSON blob for extra details
+	Metadata   *string    `gorm:"type:jsonb" json:"metadata"` // JSON blob for extra details
 	IPAddress  string     `json:"ipAddress"`
 	UserAgent  string     `json:"userAgent"`
 	CreatedAt  time.Time  `gorm:"index" json:"createdAt"`

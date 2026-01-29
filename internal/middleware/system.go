@@ -11,8 +11,8 @@ import (
 // Helper to get a system setting value
 func getSystemSetting(key string) string {
 	var setting models.SystemSettings
-	if err := database.DB.Where("key = ?", key).First(&setting).Error; err != nil {
-		return "" // Default to empty (disabled) if not found
+	if err := database.DB.Where("key = ?", key).Limit(1).Find(&setting).Error; err != nil {
+		return "" // Return empty on actual DB error
 	}
 	return setting.Value
 }
@@ -102,6 +102,21 @@ func RequireRegistrationOpen() gin.HandlerFunc {
 		if getSystemSetting(models.SettingRegistrationOpen) == "false" {
 			c.JSON(http.StatusServiceUnavailable, gin.H{
 				"error": "User registration is currently closed",
+			})
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
+// FeatureGate blocks access to a feature if its toggle is disabled
+func FeatureGate(key string, featureName string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !database.IsFeatureEnabled(key) {
+			c.JSON(http.StatusForbidden, gin.H{
+				"error":   "Feature Disabled",
+				"message": featureName + " is currently disabled by administrators.",
 			})
 			c.Abort()
 			return

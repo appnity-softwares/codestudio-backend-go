@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pushp314/devconnect-backend/internal/database"
@@ -26,7 +27,6 @@ func SetupTestDB() {
 		&models.TestCase{},
 		&models.Submission{},
 		&models.Registration{},
-		&models.Message{},
 	)
 }
 
@@ -136,7 +136,7 @@ func TestSubmitSolution_ContestNotLive(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	database.DB.Create(&models.User{ID: "user3", Email: "user3@example.com", Username: "user3"})
-	database.DB.Create(&models.Event{ID: "event_upcoming", Status: models.EventStatusUpcoming, Slug: "slug-upcoming"})
+	database.DB.Create(&models.Event{ID: "event_upcoming", Status: models.EventStatusUpcoming, Slug: "slug-upcoming", StartTime: time.Now().Add(1 * time.Hour)})
 	database.DB.Create(&models.Problem{ID: "prob_up", EventID: "event_upcoming"})
 
 	w := httptest.NewRecorder()

@@ -74,8 +74,9 @@ func createTestSnippet(t *testing.T, r *gin.Engine, token string) string {
 	var resp map[string]interface{}
 	json.Unmarshal(w.Body.Bytes(), &resp)
 
-	// Handler returns the snippet object directly
-	return resp["id"].(string)
+	// Handler returns wrapped snippet
+	snippet := resp["snippet"].(map[string]interface{})
+	return snippet["id"].(string)
 }
 
 func verifySnippetInList(t *testing.T, r *gin.Engine, snippetID string) {
@@ -116,7 +117,8 @@ func verifySnippetDetail(t *testing.T, r *gin.Engine, snippetID, token string) {
 
 	var resp map[string]interface{}
 	json.Unmarshal(w.Body.Bytes(), &resp)
-	assert.Equal(t, "Hello World", resp["title"])
+	snippet := resp["snippet"].(map[string]interface{})
+	assert.Equal(t, "Hello World", snippet["title"])
 }
 
 func updateTestSnippet(t *testing.T, r *gin.Engine, snippetID, token string) {
@@ -129,7 +131,8 @@ func updateTestSnippet(t *testing.T, r *gin.Engine, snippetID, token string) {
 	// Verify update
 	var resp map[string]interface{}
 	json.Unmarshal(w.Body.Bytes(), &resp)
-	assert.Equal(t, "Hello Universe", resp["title"])
+	snippet := resp["snippet"].(map[string]interface{})
+	assert.Equal(t, "Hello Universe", snippet["title"])
 }
 
 func deleteSnippet(t *testing.T, r *gin.Engine, snippetID, token string) {

@@ -19,10 +19,9 @@ type Snippet struct {
 	Language          string         `json:"language"`
 	Code              string         `gorm:"type:text" json:"code"`
 	Usage             string         `gorm:"type:text" json:"usage"`
-	Tags              pq.StringArray `gorm:"type:text[]" json:"tags"`            // Array of strings
-	Visibility        string         `gorm:"default:'public'" json:"visibility"` // public/private
-	AllowForks        bool           `gorm:"default:true" json:"allowForks"`
-	Output            string         `gorm:"type:text" json:"output"` // Deprecated: Use OutputSnapshot
+	Tags              pq.StringArray `gorm:"type:text[];index" json:"tags"`            // Array of strings
+	Visibility        string         `gorm:"default:'public';index" json:"visibility"` // public/private
+	Output            string         `gorm:"type:text" json:"output"`                  // Deprecated: Use OutputSnapshot
 	OutputSnapshot    string         `gorm:"type:text" json:"outputSnapshot"`
 	PreviewType       string         `gorm:"default:'TERMINAL'" json:"previewType"` // TERMINAL, WEB_PREVIEW
 	ReferenceURL      string         `json:"referenceUrl"`
@@ -30,14 +29,17 @@ type Snippet struct {
 	Runtime           float64        `gorm:"default:0" json:"runtime"` // ms
 
 	// MVP v1.1: Rich Attributes
-	Type       string `gorm:"default:'ALGORITHM'" json:"type"`    // ALGORITHM, UTILITY, EXAMPLE, VISUAL
-	Difficulty string `gorm:"default:'MEDIUM'" json:"difficulty"` // EASY, MEDIUM, HARD
+	Type       string `gorm:"default:'ALGORITHM';index" json:"type"`    // ALGORITHM, UTILITY, EXAMPLE, VISUAL
+	Difficulty string `gorm:"default:'MEDIUM';index" json:"difficulty"` // EASY, MEDIUM, HARD
 
 	// MVP v1.1: Stats & Signals
 	ViewsCount int  `gorm:"default:0" json:"viewsCount"`
-	ForkCount  int  `gorm:"default:0" json:"forkCount"`
-	CopyCount  int  `gorm:"default:0" json:"copyCount"` // v1.2: Track clipboard copies
-	IsFeatured bool `gorm:"default:false" json:"isFeatured"`
+	CopyCount  int  `gorm:"default:0" json:"copyCount"`
+	LikesCount int  `gorm:"default:0" json:"likesCount"` // v1.3 Engagement
+	IsFeatured bool `gorm:"default:false;index" json:"isFeatured"`
+
+	// Virtual Fields (Auth Context)
+	IsLiked bool `gorm:"-" json:"isLiked"`
 
 	// Execution Validation
 	Status              string `gorm:"default:'DRAFT'" json:"status"` // DRAFT, PUBLISHED
@@ -50,9 +52,6 @@ type Snippet struct {
 	// Relations
 	AuthorID string `gorm:"column:authorId" json:"authorId"`
 	Author   User   `gorm:"foreignKey:AuthorID" json:"author"`
-
-	ForkedFromID *string  `gorm:"column:forkedFromId" json:"forkedFromId"`
-	ForkedFrom   *Snippet `gorm:"foreignKey:ForkedFromID" json:"forkedFrom,omitempty"`
 }
 
 func (Snippet) TableName() string {

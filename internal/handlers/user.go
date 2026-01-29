@@ -226,14 +226,28 @@ type UpdateProfileInput struct {
 	PinnedSnippetID      *string  `json:"pinnedSnippetId"` // MVP v1.1
 	PublicProfileEnabled *bool    `json:"publicProfileEnabled"`
 	SearchVisible        *bool    `json:"searchVisible"`
+	GithubStatsVisible   *bool    `json:"githubStatsVisible"`
 }
 
 // -- Handlers -- //
 
 // GetProfile handles GET /users/profile (Current User) or /users/:username
 func GetProfile(c *gin.Context) {
-	// If "username" param is present, fetch that user. Else fetch current user.
 	username := c.Param("username")
+	var viewerID string
+
+	// Check auth for blocking logic (Optional Auth)
+	if id, exists := c.Get("userId"); exists {
+		viewerID = id.(string)
+	} else {
+		// Manual header check since route might not have OptionalAuthMiddleware
+		authHeader := c.GetHeader("Authorization")
+		if len(authHeader) > 7 && authHeader[:7] == "Bearer " {
+			if claims, err := utils.ValidateToken(authHeader[7:]); err == nil {
+				viewerID = claims.UserID
+			}
+		}
+	}
 
 	var user models.User
 	var result error
@@ -243,6 +257,22 @@ func GetProfile(c *gin.Context) {
 
 	if username != "" && username != "me" {
 		result = query.Where("username = ? OR id = ?", username, username).First(&user).Error
+
+		// Blocking Check
+		if result == nil && viewerID != "" && viewerID != user.ID {
+			var blockCount int64
+			// Check if viewer blocked user OR user blocked viewer
+			database.DB.Model(&models.UserBlock{}).
+				Where("(blocker_id = ? AND blocked_id = ?) OR (blocker_id = ? AND blocked_id = ?)",
+					viewerID, user.ID, user.ID, viewerID).
+				Count(&blockCount)
+
+			if blockCount > 0 {
+				c.JSON(http.StatusNotFound, gin.H{"error": "User not found"}) // Hide completely
+				return
+			}
+		}
+
 	} else {
 		userID, exists := c.Get("userId")
 		if !exists {
@@ -262,7 +292,17 @@ func GetProfile(c *gin.Context) {
 	database.DB.Model(&models.Snippet{}).Where(&models.Snippet{AuthorID: user.ID}).Count(&snippetCount)
 	user.Count.Snippets = snippetCount
 
-	c.JSON(http.StatusOK, gin.H{"user": user})
+	// Add IsFollowing status if viewer exists
+	isFollowing := false
+	if viewerID != "" && viewerID != user.ID {
+		var count int64
+		database.DB.Model(&models.UserLink{}).Where("linker_id = ? AND linked_id = ?", viewerID, user.ID).Count(&count)
+		if count > 0 {
+			isFollowing = true
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"user": user, "isFollowing": isFollowing})
 }
 
 // UpdateProfile handles PUT /users/profile
@@ -298,7 +338,7 @@ func UpdateProfile(c *gin.Context) {
 		}
 		// Verify uniqueness
 		var count int64
-		database.DB.Model(&models.User{}).Where("username = ?", input.Username).Count(&count)
+		database.DB.Model(&models.User{}).Where("username = ? AND id != ?", input.Username, userID).Count(&count)
 		if count > 0 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Username already taken"})
 			return
@@ -306,7 +346,10 @@ func UpdateProfile(c *gin.Context) {
 
 		// Check Limits
 		now := time.Now()
-		daysSinceLastChange := now.Sub(user.LastUsernameChangeAt).Hours() / 24
+		var daysSinceLastChange float64 = 999 // Default to allowed
+		if user.LastUsernameChangeAt != nil {
+			daysSinceLastChange = now.Sub(*user.LastUsernameChangeAt).Hours() / 24
+		}
 
 		if daysSinceLastChange < 90 {
 			if user.UsernameChangeCount >= 2 {
@@ -322,10 +365,9 @@ func UpdateProfile(c *gin.Context) {
 		}
 
 		user.Username = input.Username
-		user.LastUsernameChangeAt = now
+		user.LastUsernameChangeAt = &now
 	}
 
-	// Allow empty bio updates? If strict MVP, maybe. But standard is yes.
 	if input.Bio != "" {
 		user.Bio = input.Bio
 	}
@@ -341,16 +383,14 @@ func UpdateProfile(c *gin.Context) {
 	if input.LinkedInURL != "" {
 		user.LinkedInURL = input.LinkedInURL
 	}
-	if input.Visibility != "" {
-		user.Visibility = models.Visibility(input.Visibility)
-	}
 
-	if len(input.Languages) > 0 {
+	if input.Languages != nil {
 		user.PreferredLanguages = input.Languages
 	}
-	if len(input.Interests) > 0 {
+	if input.Interests != nil {
 		user.Interests = input.Interests
 	}
+
 	if input.PinnedSnippetID != nil {
 		user.PinnedSnippetID = input.PinnedSnippetID
 	}
@@ -360,6 +400,13 @@ func UpdateProfile(c *gin.Context) {
 	if input.SearchVisible != nil {
 		user.SearchVisible = *input.SearchVisible
 	}
+	if input.GithubStatsVisible != nil {
+		user.GithubStatsVisible = *input.GithubStatsVisible
+	}
+
+	if input.Visibility != "" {
+		user.Visibility = models.Visibility(input.Visibility)
+	}
 
 	// Ensure we save updates
 	database.DB.Save(&user)
@@ -367,7 +414,7 @@ func UpdateProfile(c *gin.Context) {
 	// Populate Counts for response
 	var snippetCount int64
 	// Use explicit query to avoid GORM struct zero-value pitfalls
-	database.DB.Model(&models.Snippet{}).Where("author_id = ?", user.ID).Count(&snippetCount)
+	database.DB.Model(&models.Snippet{}).Where("\"authorId\" = ?", user.ID).Count(&snippetCount)
 	user.Count.Snippets = snippetCount
 
 	c.JSON(http.StatusOK, gin.H{"user": user})
@@ -431,7 +478,10 @@ func GetPublicProfile(c *gin.Context) {
 		"topSnippets":          topSnippets,
 		"preferredLanguages":   user.PreferredLanguages,
 		"interests":            user.Interests,
-		"publicProfileEnabled": user.PublicProfileEnabled, // public needs to know? sure.
+		"publicProfileEnabled": user.PublicProfileEnabled,
+		"linkersCount":         user.LinkersCount,
+		"linkedCount":          user.LinkedCount,
+		"xp":                   user.XP,
 	}
 
 	c.JSON(http.StatusOK, gin.H{"user": safeUser})
@@ -578,13 +628,6 @@ func GetStats(c *gin.Context) {
 	var snippetCount int64
 	database.DB.Model(&models.Snippet{}).Where("\"authorId\" = ?", userId).Count(&snippetCount)
 
-	// v1.2: Count total forks received on user's snippets
-	var totalForksReceived int64
-	database.DB.Model(&models.Snippet{}).
-		Select("COALESCE(SUM(fork_count), 0)").
-		Where("\"authorId\" = ?", userId).
-		Scan(&totalForksReceived)
-
 	// v1.2: Count total copies received
 	var totalCopiesReceived int64
 	database.DB.Model(&models.Snippet{}).
@@ -627,7 +670,6 @@ func GetStats(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"snippets":            snippetCount,
-		"totalForksReceived":  totalForksReceived,
 		"totalCopiesReceived": totalCopiesReceived,
 		"contestSolves":       contestSolves,
 		"contestsJoined":      contestsJoined,
@@ -651,11 +693,77 @@ func GetStats(c *gin.Context) {
 
 // GetUserSnippets handles GET /users/:id/snippets
 func GetUserSnippets(c *gin.Context) {
-	userId := c.Param("username")
+	targetID := c.Param("username")
+	var viewerID string
+
+	// Check auth for blocking logic (Optional Auth)
+	if id, exists := c.Get("userId"); exists {
+		viewerID = id.(string)
+	} else {
+		authHeader := c.GetHeader("Authorization")
+		if len(authHeader) > 7 && authHeader[:7] == "Bearer " {
+			if claims, err := utils.ValidateToken(authHeader[7:]); err == nil {
+				viewerID = claims.UserID
+			}
+		}
+	}
+
+	// 1. Get Target User Status
+	var targetUser models.User
+	if err := database.DB.Select("id, visibility").Where("id = ? OR username = ?", targetID, targetID).First(&targetUser).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	// Blocking Check
+	if viewerID != "" && viewerID != targetUser.ID {
+		var blockCount int64
+		database.DB.Model(&models.UserBlock{}).
+			Where("(blocker_id = ? AND blocked_id = ?) OR (blocker_id = ? AND blocked_id = ?)",
+				viewerID, targetUser.ID, targetUser.ID, viewerID).
+			Count(&blockCount)
+
+		if blockCount > 0 {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			return
+		}
+	}
+
+	// 2. Privacy Check
+	if targetUser.Visibility == models.VisibilityPrivate {
+		// If private, only linked users or author can see
+		isAuthor := viewerID != "" && viewerID == targetUser.ID
+		isLinked := false
+
+		if !isAuthor && viewerID != "" {
+			var count int64
+			database.DB.Model(&models.UserLink{}).Where("linker_id = ? AND linked_id = ?", viewerID, targetUser.ID).Count(&count)
+			isLinked = count > 0
+		}
+
+		if !isAuthor && !isLinked {
+			c.JSON(http.StatusForbidden, gin.H{
+				"error":    "Profile is private",
+				"snippets": []models.Snippet{},
+				"private":  true,
+			})
+			return
+		}
+	}
 
 	snippets := []models.Snippet{}
-	if err := database.DB.Where("\"authorId\" = ?", userId).Preload("Author").Find(&snippets).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch snippets"})
+	// Postgres is case-sensitive for quoted identifiers.
+	// The DB table is "Snippet" and columns are "authorId", "createdAt".
+	if err := database.DB.Model(&models.Snippet{}).
+		Preload("Author").
+		Where("\"authorId\" = ?", targetUser.ID).
+		Order("\"createdAt\" DESC").
+		Find(&snippets).Error; err != nil {
+		fmt.Printf("Error fetching user snippets: %v\n", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "Failed to fetch snippets",
+			"details": err.Error(),
+		})
 		return
 	}
 
@@ -689,7 +797,7 @@ func GetBadges(c *gin.Context) {
 	// 3. Calculate Stats for Self-Healing & Influence
 	// Count ALL snippets (including drafts, so users see progress immediately)
 	var snippetCount int64
-	database.DB.Model(&models.Snippet{}).Where("(author_id = ? OR \"authorId\" = ?)", user.ID, user.ID).Count(&snippetCount)
+	database.DB.Model(&models.Snippet{}).Where("\"authorId\" = ?", user.ID).Count(&snippetCount)
 
 	// Count Contests
 	var contestCount int64

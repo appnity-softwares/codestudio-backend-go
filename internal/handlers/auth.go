@@ -103,7 +103,17 @@ func Register(c *gin.Context) {
 	}
 
 	if result := database.DB.Create(&user); result.Error != nil {
-		// Check for unique constraint violation (simplified)
+		// Differentiate between email and username conflict
+		var existingUser models.User
+		if err := database.DB.Where("email = ?", input.Email).First(&existingUser).Error; err == nil {
+			c.JSON(http.StatusConflict, gin.H{"error": "An account with this email already exists. Please sign in instead."})
+			return
+		}
+		if err := database.DB.Where("username = ?", input.Username).First(&existingUser).Error; err == nil {
+			c.JSON(http.StatusConflict, gin.H{"error": "This username is already taken. Please choose another one."})
+			return
+		}
+
 		logger.Warn().Err(result.Error).Str("email", input.Email).Msg("Registration failed: unique violation")
 		c.JSON(http.StatusConflict, gin.H{"error": "User with this email or username already exists"})
 		return
@@ -244,13 +254,15 @@ func GoogleCallback(c *gin.Context) {
 	code := c.Query("code")
 	token, err := googleOauthConfig.Exchange(context.Background(), code)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to exchange token"})
+		logger.Error().Err(err).Msg("Google OAuth exchange failed")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to exchange token: " + err.Error()})
 		return
 	}
 
 	client := googleOauthConfig.Client(context.Background(), token)
 	resp, err := client.Get("https://www.googleapis.com/oauth2/v2/userinfo")
 	if err != nil {
+		logger.Error().Err(err).Msg("Failed to get Google user info")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get user info"})
 		return
 	}
@@ -264,12 +276,16 @@ func GoogleCallback(c *gin.Context) {
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&userInfo); err != nil {
+		logger.Error().Err(err).Msg("Failed to parse Google user info")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse user info"})
 		return
 	}
 
-	// Login or Register logic
-	handleOAuthLogin(c, userInfo.Email, userInfo.Name, userInfo.Picture)
+	logger.Info().Str("email", userInfo.Email).Msg("Google user info retrieved successfully")
+	user := handleOAuthLogin(c, userInfo.Email, userInfo.Name, userInfo.Picture)
+	if user != nil {
+		finishOAuthLogin(c, user)
+	}
 }
 
 // GitHub
@@ -319,33 +335,42 @@ func GithubCallback(c *gin.Context) {
 	// If email is missing, fetch it
 	email := userInfo.Email
 	if email == "" {
-		// Fetch emails logic (omitted for brevity, assume we need email)
-		// Usually GET /user/emails
 		email = fmt.Sprintf("%s@github.placeholder", userInfo.Login) // Fallback for now
 	}
 
-	handleOAuthLogin(c, email, userInfo.Name, userInfo.AvatarURL)
+	user := handleOAuthLogin(c, email, userInfo.Name, userInfo.AvatarURL)
+	if user != nil && database.IsFeatureEnabled(models.SettingFeatureGithubStats) {
+		// Fetch stats in background
+		go func(tokenStr string, u models.User) {
+			if err := FetchAndStoreGithubStats(tokenStr, &u); err != nil {
+				logger.Error().Err(err).Str("user_id", u.ID).Msg("Failed to background sync GitHub stats")
+			}
+		}(token.AccessToken, *user)
+	}
+
+	if user != nil {
+		finishOAuthLogin(c, user)
+	}
 }
 
-// Common OAuth Handler
-func handleOAuthLogin(c *gin.Context, email, name, image string) {
+// Common OAuth Handler - Resolves user by email or creates new
+func handleOAuthLogin(c *gin.Context, email, name, image string) *models.User {
 	var user models.User
-	var err error
-
-	// 1. Check if user exists by email
 	result := database.DB.Where("email = ?", email).First(&user)
 
 	if result.Error == gorm.ErrRecordNotFound {
-		// Check if registration is open
+		// New User logic
+		logger.Info().Str("email", email).Msg("New user registration attempt via OAuth")
+
 		var regSetting models.SystemSettings
 		if err := database.DB.Where("key = ?", models.SettingRegistrationOpen).First(&regSetting).Error; err == nil {
 			if regSetting.Value == "false" {
+				logger.Warn().Str("email", email).Msg("Registration closed during OAuth attempt")
 				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "User registration is currently closed"})
-				return
+				return nil
 			}
 		}
 
-		// 2. Register new user
 		// Generate better username from name or email prefix
 		baseUsername := ""
 		if name != "" {
@@ -373,19 +398,29 @@ func handleOAuthLogin(c *gin.Context, email, name, image string) {
 			Name:          name,
 			Image:         image,
 			Username:      cleaned + "_" + uuid.New().String()[:4], // Ensure uniqueness
+			Role:          models.RoleUser,
+			Visibility:    models.VisibilityPublic,
 		}
+
 		if createErr := database.DB.Create(&user).Error; createErr != nil {
-			logger.Error().Err(createErr).Msg("Failed to create user during OAuth")
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user: " + createErr.Error()})
-			return
+			logger.Error().Err(createErr).Str("email", email).Msg("CRITICAL: Failed to create user during OAuth")
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error":   "Account creation failed",
+				"details": createErr.Error(),
+			})
+			return nil
 		}
-		logger.Info().Str("email", email).Msg("New user registered via OAuth")
+		logger.Info().Str("email", email).Str("user_id", user.ID).Msg("New user successfully registered via OAuth")
 	} else if result.Error != nil {
-		logger.Error().Err(result.Error).Msg("Database error during OAuth")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
-		return
+		logger.Error().Err(result.Error).Str("email", email).Msg("Database query failed during handleOAuthLogin")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error during login process"})
+		return nil
 	}
 
+	return &user
+}
+
+func finishOAuthLogin(c *gin.Context, user *models.User) {
 	// 3. Generate Token
 	token, err := utils.GenerateToken(user.ID)
 	if err != nil {
@@ -430,7 +465,8 @@ func ForgotPassword(c *gin.Context) {
 	// Generate Reset Token
 	resetToken := uuid.New().String()
 	user.ResetToken = resetToken
-	user.ResetTokenExpiry = time.Now().Add(15 * time.Minute) // 15 mins expiry
+	expiry := time.Now().Add(15 * time.Minute)
+	user.ResetTokenExpiry = &expiry // 15 mins expiry
 
 	if err := database.DB.Save(&user).Error; err != nil {
 		logger.Error().Err(err).Msg("Failed to generate reset token")
@@ -468,7 +504,7 @@ func ResetPassword(c *gin.Context) {
 		return
 	}
 
-	if time.Now().After(user.ResetTokenExpiry) {
+	if user.ResetTokenExpiry != nil && time.Now().After(*user.ResetTokenExpiry) {
 		logger.Warn().Str("token", input.Token).Msg("Password reset failed: expired token")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Token expired"})
 		return

@@ -65,22 +65,29 @@ type User struct {
 	Endorsements pq.StringArray `gorm:"type:text[]" json:"endorsements"`
 
 	// Identity Management
-	UsernameChangeCount  int       `gorm:"default:0" json:"usernameChangeCount"`
-	LastUsernameChangeAt time.Time `json:"lastUsernameChangeAt"`
+	UsernameChangeCount  int        `gorm:"default:0" json:"usernameChangeCount"`
+	LastUsernameChangeAt *time.Time `json:"lastUsernameChangeAt"`
 
 	// Privacy settings
 	PublicProfileEnabled bool `gorm:"default:true" json:"publicProfileEnabled"`
 	SearchVisible        bool `gorm:"default:true" json:"searchVisible"`
+	GithubStatsVisible   bool `gorm:"default:true;column:githubStatsVisible" json:"githubStatsVisible"`
 
 	// Cached Counters (for Leaderboard/Community performance)
 	WrappedSnippetCount int `gorm:"default:0;column:snippet_count" json:"snippetCount"`
-	WrappedForkCount    int `gorm:"default:0;column:fork_count" json:"forkCount"`
 	WrappedViewCount    int `gorm:"default:0;column:view_count" json:"viewCount"`
 	WrappedContestCount int `gorm:"default:0;column:contest_count" json:"contestCount"`
 	XP                  int `gorm:"default:0" json:"xp"`
 
-	ResetToken       string    `json:"-"`
-	ResetTokenExpiry time.Time `json:"-"`
+	// Social & Engagement (Cached)
+	LinkersCount int `gorm:"default:0;column:linkersCount" json:"linkersCount"` // Followers
+	LinkedCount  int `gorm:"default:0;column:linkedCount" json:"linkedCount"`   // Following
+
+	// Future Integrations
+	GithubStats *string `gorm:"type:jsonb" json:"githubStats"` // JSONB for flexible stats
+
+	ResetToken       string     `json:"-"`
+	ResetTokenExpiry *time.Time `json:"-"`
 
 	Password string `json:"-"`
 

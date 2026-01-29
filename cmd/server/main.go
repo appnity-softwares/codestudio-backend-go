@@ -41,6 +41,11 @@ func main() {
 	database.InitRedis() // Initialize Redis
 
 	// --- Database Migration Stage ---
+	// Enable UUID extension (required for uuid_generate_v4)
+	if err := database.DB.Exec("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\"").Error; err != nil {
+		logger.Warn().Err(err).Msg("Failed to create uuid-ossp extension (might strictly need superuser, ignoring if standard UUIDs work)")
+	}
+
 	logger.Info().Msg("🔄 Running Database Migrations (Stage 1: Tables)...")
 
 	// Temporarily disable foreign key constraints to handle circular dependencies (User <-> Snippet)
@@ -50,6 +55,8 @@ func main() {
 		&models.User{},
 		&models.Event{},
 		&models.Snippet{},
+		&models.Notification{},
+		&models.Conversation{},
 		&models.Message{},
 		&models.Registration{},
 		&models.Submission{},
@@ -74,6 +81,14 @@ func main() {
 		&models.RolePermission{},
 		&models.Playlist{},
 		&models.PlaylistSnippet{},
+		&models.UserLink{},
+		&models.SnippetLike{},
+		&models.Comment{},
+		&models.Badge{},
+		&models.UserBadge{},
+		&models.LinkRequest{},
+		&models.UserBlock{},
+		&models.Report{},
 	}
 
 	for _, m := range tableModels {
@@ -139,6 +154,8 @@ func main() {
 		routes.RegisterPracticeRoutes(protected) // v1.2: Practice Arena
 		routes.RegisterFeedbackRoutes(api)       // Feedback Wall Routes (Hybrid Public/Protected)
 		routes.RegisterPlaylistRoutes(protected) // v1.3: Playlist Tracks
+		routes.RegisterSocialRoutes(protected)   // v1.3: Social Graph (Link/Unlink)
+		routes.RegisterNotificationRoutes(protected)
 	}
 
 	// Enhanced health check with DB and Redis status

@@ -815,20 +815,41 @@ func AdminDeleteUser(c *gin.Context) {
 			return err
 		}
 
-		// Soft delete or Hard delete? Usually soft delete is safer.
-		// models.User has gorm.DeletedAt, so tx.Delete will soft delete.
-		if err := tx.Delete(&user).Error; err != nil {
+		// Comprehensive Hard Delete (Manual Cascade)
+		// 1. Social & Engagement
+		tx.Unscoped().Where("linker_id = ? OR linked_id = ?", targetUserID, targetUserID).Delete(&models.UserLink{})
+		tx.Unscoped().Where("sender_id = ? OR receiver_id = ?", targetUserID, targetUserID).Delete(&models.LinkRequest{})
+		tx.Unscoped().Where("blocker_id = ? OR blocked_id = ?", targetUserID, targetUserID).Delete(&models.UserBlock{})
+
+		// 2. Content (Snippets & Comments)
+		// Note: Snippets might have their own dependencies (Likes, Comments).
+		// Ideally DB has ON DELETE CASCADE, but to be safe we delete what we can.
+		tx.Unscoped().Where("user_id = ?", targetUserID).Delete(&models.SnippetLike{})
+		tx.Unscoped().Where("user_id = ?", targetUserID).Delete(&models.Comment{})
+		// Delete snippets authored by user
+		tx.Unscoped().Where("\"authorId\" = ?", targetUserID).Delete(&models.Snippet{})
+
+		// 3. Activity & System
+		tx.Unscoped().Where("user_id = ?", targetUserID).Delete(&models.Submission{})
+		tx.Unscoped().Where("user_id = ?", targetUserID).Delete(&models.Registration{})
+		tx.Unscoped().Where("user_id = ?", targetUserID).Delete(&models.UserSuspension{})
+		tx.Unscoped().Where("user_id = ?", targetUserID).Delete(&models.TrustScoreHistory{})
+		tx.Unscoped().Where("user_id = ? OR actor_id = ?", targetUserID, targetUserID).Delete(&models.Notification{})
+		tx.Unscoped().Where("reporter_id = ? OR target_id = ?", targetUserID, targetUserID).Delete(&models.Report{})
+
+		// 4. Delete User (Hard Delete)
+		if err := tx.Unscoped().Delete(&user).Error; err != nil {
 			return err
 		}
 
-		return logAdminAction(tx, adminID, models.ActionDeleteUser, targetUserID, "user", "Deleted by Admin")
+		return logAdminAction(tx, adminID, models.ActionDeleteUser, targetUserID, "user", "Hard Deleted by Admin")
 	})
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"message": "User deleted successfully"})
+	c.JSON(http.StatusOK, gin.H{"message": "User and all associated data permanently deleted"})
 }
 
 // AdminGetRolePermissions handles GET /admin/roles/permissions
@@ -926,6 +947,10 @@ func AdminUpdateSystemSettings(c *gin.Context) {
 		models.SettingBannerBadge:                 true,
 		models.SettingBannerContent:               true,
 		models.SettingBannerLink:                  true,
+		models.SettingFeatureGithubStats:          true,
+		models.SettingFeatureSocialChat:           true,
+		models.SettingFeatureSocialFollow:         true,
+		models.SettingFeatureSocialFeed:           true,
 	}
 	if !validKeys[req.Key] {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid setting key"})
@@ -970,6 +995,10 @@ func PublicGetSystemStatus(c *gin.Context) {
 		models.SettingBannerBadge,
 		models.SettingBannerContent,
 		models.SettingBannerLink,
+		models.SettingFeatureGithubStats,
+		models.SettingFeatureSocialChat,
+		models.SettingFeatureSocialFollow,
+		models.SettingFeatureSocialFeed,
 	}).Find(&settings)
 
 	settingsMap := make(map[string]string)
@@ -1053,4 +1082,43 @@ func AdminTriggerRedeploy(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message": fmt.Sprintf("Redeployment triggered for %s. Server may restart shortly.", req.Mode),
 	})
+}
+
+// AdminGetReports retrieves all community reports
+func AdminGetReports(c *gin.Context) {
+	var reports []models.Report
+	if err := database.DB.Preload("Reporter").Order("created_at desc").Find(&reports).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch reports"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"reports": reports})
+}
+
+// AdminResolveReport handles resolving/dismissing a report
+func AdminResolveReport(c *gin.Context) {
+	adminID := getAdminID(c)
+	reportID := c.Param("id")
+	var input struct {
+		Status string `json:"status" binding:"required"` // RESOLVED, DISMISSED
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var report models.Report
+	if err := database.DB.First(&report, "id = ?", reportID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Report not found"})
+		return
+	}
+
+	report.Status = input.Status
+	if err := database.DB.Save(&report).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update report"})
+		return
+	}
+
+	logAdminAction(database.DB, adminID, models.ActionManageModeration, "report", report.ID, "Resolved report with status: "+input.Status)
+
+	c.JSON(http.StatusOK, gin.H{"message": "Report updated successfully"})
 }

@@ -16,6 +16,7 @@ func RegisterUserRoutes(r gin.IRouter) {
 			protected.GET("/stats", handlers.GetStats)
 			protected.GET("", handlers.GetProfile)
 			protected.PUT("", handlers.UpdateProfile)
+			protected.POST("/github/sync", handlers.SyncGithubStats)
 		}
 
 		// Public (Wildcard last)

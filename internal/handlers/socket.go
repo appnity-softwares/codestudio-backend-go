@@ -124,16 +124,29 @@ func InitSocketServer() *socketio.Server {
 		s.Join(chatId)
 	})
 
-	server.OnEvent("/", "send_message", func(s socketio.Conn, data map[string]interface{}) {
-		// MVP LOCKDOWN: Messaging Disabled
-		log.Println("Blocked message attempt (MVP Lockdown)")
-		// Optionally emit error back to client if client supports it
-		// s.Emit("error", "Messaging is disabled in MVP")
-	})
-
 	server.OnEvent("/", "typing", func(s socketio.Conn, data map[string]interface{}) {
-		if chatId, ok := data["chatId"].(string); ok {
-			server.BroadcastToRoom("/", chatId, "user_typing", data)
+		recipientID, ok := data["recipientId"].(string)
+		if !ok {
+			recipientID, _ = data["receiverId"].(string)
+		}
+
+		if recipientID != "" {
+			// Find who is typing (from socket context or map)
+			senderID := ""
+			onlineUsersMu.RLock()
+			for uid, sid := range onlineUsers {
+				if sid == s.ID() {
+					senderID = uid
+					break
+				}
+			}
+			onlineUsersMu.RUnlock()
+
+			if senderID != "" {
+				server.BroadcastToRoom("/", recipientID, "user_typing", map[string]interface{}{
+					"userId": senderID,
+				})
+			}
 		}
 	})
 

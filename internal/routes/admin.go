@@ -100,6 +100,10 @@ func RegisterAdminRoutes(rg *gin.RouterGroup) {
 		// Avatars also usually staff/moderation
 		moderation.POST("/avatars", handlers.AdminAddAvatarSeed)
 		moderation.DELETE("/avatars/:id", handlers.AdminDeleteAvatarSeed)
+
+		// Community Reports (New)
+		moderation.GET("/reports", handlers.AdminGetReports)
+		moderation.POST("/reports/:id/resolve", handlers.AdminResolveReport)
 	}
 
 	// Audit Logs (Granular Permission)

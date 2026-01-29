@@ -4,6 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pushp314/devconnect-backend/internal/handlers"
 	"github.com/pushp314/devconnect-backend/internal/middleware"
+	"github.com/pushp314/devconnect-backend/internal/models"
 )
 
 func RegisterSnippetRoutes(r gin.IRouter) {
@@ -32,11 +33,11 @@ func RegisterSnippetRoutes(r gin.IRouter) {
 				creationEnabled.DELETE("/:id", handlers.DeleteSnippet)
 				creationEnabled.PATCH("/:id/output", handlers.UpdateSnippetOutput)
 				creationEnabled.POST("/:id/publish", handlers.PublishSnippet)
-				creationEnabled.POST("/:id/fork", handlers.ForkSnippet)
+
 			}
 		}
 	}
 
 	// v1.2: Smart Feed (Public)
-	r.GET("/feed", middleware.OptionalAuthMiddleware(), handlers.GetFeed)
+	r.GET("/feed", middleware.OptionalAuthMiddleware(), middleware.FeatureGate(models.SettingFeatureSocialFeed, "Discovery Feed"), handlers.GetFeed)
 }

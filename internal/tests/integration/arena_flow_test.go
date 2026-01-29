@@ -100,13 +100,15 @@ func createTestUser(t *testing.T, prefix string, role string) string {
 	// 1. Register
 	// We'll just create directly in DB to save time and set Role easily
 	passHash, _ := bcrypt.GenerateFromPassword([]byte("password123"), bcrypt.DefaultCost)
+	stats := "{}"
 	user := models.User{
-		ID:       utils.GenerateID(),
-		Username: prefix + "_user",
-		Email:    prefix + "@test.com",
-		Password: string(passHash),
-		Name:     prefix + " Test",
-		Role:     models.Role(role),
+		ID:          utils.GenerateID(),
+		Username:    prefix + "_user",
+		Email:       prefix + "@test.com",
+		Password:    string(passHash),
+		Name:        prefix + " Test",
+		Role:        models.Role(role),
+		GithubStats: &stats,
 	}
 	if err := database.DB.Create(&user).Error; err != nil {
 		t.Fatalf("Failed to create user %s: %v", prefix, err)
@@ -204,7 +206,8 @@ func submitSolution(t *testing.T, r *gin.Engine, token string, problemID string)
 	// Handler: if err != nil { c.JSON(http.StatusOK, ... type: run ... code: 1) } -> this is for RunSolution?
 	// SubmitSolution: if err != nil { submission.Status = RE ... c.JSON(http.StatusCreated, ...) }
 	// So we expect 201 Created regardless of execution success (unless DB fail)
-	assert.Equal(t, http.StatusCreated, w.Code)
+	// Handler returns 200 OK (http.StatusOK)
+	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp map[string]interface{}
 	json.Unmarshal(w.Body.Bytes(), &resp)

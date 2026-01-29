@@ -7,13 +7,16 @@ import (
 	"github.com/pushp314/devconnect-backend/internal/config"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 var DB *gorm.DB
 
 func Connect() {
 	dsn := config.AppConfig.DatabaseURL
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
@@ -31,4 +34,18 @@ func Connect() {
 
 	DB = db
 	log.Println("Connected to PostgreSQL with connection pooling (max: 25, idle: 10)")
+}
+
+// IsFeatureEnabled checks if a system setting (feature flag) is set to "true"
+func IsFeatureEnabled(key string) bool {
+	if DB == nil {
+		return false
+	}
+	var setting struct {
+		Value string
+	}
+	if err := DB.Table("system_settings").Select("value").Where("key = ?", key).First(&setting).Error; err != nil {
+		return false
+	}
+	return setting.Value == "true"
 }

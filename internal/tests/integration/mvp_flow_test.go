@@ -32,7 +32,8 @@ func TestMVP_Minimal_e2e(t *testing.T) {
 
 	var createResp map[string]interface{}
 	json.Unmarshal(w.Body.Bytes(), &createResp)
-	snippetID := createResp["id"].(string)
+	snippet := createResp["snippet"].(map[string]interface{})
+	snippetID := snippet["id"].(string)
 
 	// 4. Fetch Snippet List
 	wList := performRequest(r, "GET", "/api/snippets", nil, "")

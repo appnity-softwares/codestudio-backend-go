@@ -405,6 +405,11 @@ func SubmitSolution(c *gin.Context) {
 			isLateSubmission = true
 			// We allow submission for practice/upsolving, but scores won't count.
 		}
+		// Time Lock: Not Started
+		if time.Now().UTC().Before(event.StartTime) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Contest has not started yet (not live)"})
+			return
+		}
 	}
 
 	// Rule: Registration Check (skip for practice)

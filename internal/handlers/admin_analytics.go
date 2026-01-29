@@ -35,12 +35,7 @@ func AdminGetSuspiciousActivity(c *gin.Context) {
 	var highCopySnippets []models.Snippet
 	database.DB.Preload("Author").Order("copy_count desc").Limit(10).Find(&highCopySnippets)
 
-	// Snippets with high fork counts (viral or spam)
-	var highForkSnippets []models.Snippet
-	database.DB.Preload("Author").Order("fork_count desc").Limit(10).Find(&highForkSnippets)
-
 	c.JSON(http.StatusOK, gin.H{
 		"highCopySnippets": highCopySnippets,
-		"highForkSnippets": highForkSnippets,
 	})
 }

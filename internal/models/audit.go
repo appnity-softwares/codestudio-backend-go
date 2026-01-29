@@ -30,6 +30,7 @@ const (
 	ActionUpdatePermissions ActionType = "UPDATE_PERMISSIONS"
 	ActionDeleteSnippet     ActionType = "DELETE_SNIPPET"
 	ActionManageSystem      ActionType = "MANAGE_SYSTEM"
+	ActionManageModeration  ActionType = "MANAGE_MODERATION"
 )
 
 type AdminAction struct {

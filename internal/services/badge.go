@@ -25,7 +25,7 @@ func CheckBadges(userID string) ([]models.Badge, error) {
 	database.DB.Model(&models.Submission{}).Where("user_id = ? AND status = 'ACCEPTED'", userID).Count(&solvedCount)
 
 	var snippetCount int64
-	database.DB.Model(&models.Snippet{}).Where("author_id = ? OR \"authorId\" = ?", userID, userID).Count(&snippetCount)
+	database.DB.Model(&models.Snippet{}).Where("\"authorId\" = ?", userID).Count(&snippetCount)
 
 	var feedbackCount int64
 	database.DB.Model(&models.FeedbackMessage{}).Where("user_id = ?", userID).Count(&feedbackCount)
@@ -36,7 +36,7 @@ func CheckBadges(userID string) ([]models.Badge, error) {
 	// Count Early Adopter qualification (First 1000 Users)
 	var rank int64
 	database.DB.Model(&models.User{}).
-		Where("created_at <= (SELECT created_at FROM users WHERE id = ?)", userID).
+		Where("\"createdAt\" <= (SELECT \"createdAt\" FROM \"User\" WHERE id = ?)", userID).
 		Count(&rank)
 
 	earlyAdopterStatus := int64(0)

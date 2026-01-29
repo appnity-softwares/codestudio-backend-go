@@ -1,10 +1,8 @@
 package handlers
 
 import (
-	"encoding/xml"
 	"fmt"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -12,125 +10,73 @@ import (
 	"github.com/pushp314/devconnect-backend/internal/models"
 )
 
-const BaseURL = "https://codestudio.appnity.cloud"
-
-// Sitemap Cache
-var (
-	sitemapCache     []byte
-	sitemapRefreshed time.Time
-	sitemapMutex     sync.RWMutex
-	cacheDuration    = 6 * time.Hour
-)
-
-// SitemapEntry represents a single URL entry in the sitemap
-type SitemapEntry struct {
-	XMLName    xml.Name `xml:"url"`
-	Loc        string   `xml:"loc"`
-	LastMod    string   `xml:"lastmod,omitempty"`
-	ChangeFreq string   `xml:"changefreq,omitempty"`
-	Priority   string   `xml:"priority,omitempty"`
-}
-
-// URLSet is the root element of the sitemap
-type URLSet struct {
-	XMLName xml.Name       `xml:"http://www.sitemaps.org/schemas/sitemap/0.9 urlset"`
-	URLs    []SitemapEntry `xml:"url"`
-}
-
-// GenerateSitemap handles the dynamic sitemap generation with caching
+// GenerateSitemap generates a dynamic sitemap.xml
 func GenerateSitemap(c *gin.Context) {
-	// 1. Check Cache
-	sitemapMutex.RLock()
-	if sitemapCache != nil && time.Since(sitemapRefreshed) < cacheDuration {
-		c.Header("Content-Type", "application/xml")
-		c.Writer.Write(sitemapCache)
-		sitemapMutex.RUnlock()
-		return
-	}
-	sitemapMutex.RUnlock()
-
-	var urls []SitemapEntry
-
-	// 2. Static Pages (Public)
-	staticPages := []string{"", "/snippets", "/arena", "/changelog"}
-	for _, p := range staticPages {
-		urls = append(urls, SitemapEntry{
-			Loc:        BaseURL + p,
-			ChangeFreq: "daily",
-			Priority:   "0.8",
-		})
-	}
-
-	// 3. Snippets (Public only)
-	var snippets []models.Snippet
-	database.DB.Select("id, \"updatedAt\"").Where("visibility = ?", "PUBLIC").Order("\"createdAt\" desc").Limit(2000).Find(&snippets)
-	for _, s := range snippets {
-		urls = append(urls, SitemapEntry{
-			Loc:        fmt.Sprintf("%s/snippet/%s", BaseURL, s.ID),
-			LastMod:    s.UpdatedAt.Format("2006-01-02"),
-			ChangeFreq: "weekly",
-			Priority:   "0.6",
-		})
-	}
-
-	// 4. Contests (Public + Live/Upcoming/Ended)
-	var events []models.Event
-	database.DB.Select("id, updated_at").Where("status IN ?", []string{"LIVE", "UPCOMING", "ENDED", "FROZEN"}).Find(&events)
-	for _, e := range events {
-		urls = append(urls, SitemapEntry{
-			Loc:        fmt.Sprintf("%s/contest/%s", BaseURL, e.ID),
-			LastMod:    e.UpdatedAt.Format("2006-01-02"),
-			ChangeFreq: "daily",
-			Priority:   "0.7",
-		})
-	}
-
-	// 5. User Profiles (Public only)
-	var users []models.User
-	database.DB.Select("username, \"createdAt\"").Where("visibility = ?", "PUBLIC").Limit(1000).Find(&users)
-	for _, u := range users {
-		urls = append(urls, SitemapEntry{
-			Loc:        fmt.Sprintf("%s/u/%s", BaseURL, u.Username),
-			LastMod:    u.CreatedAt.Format("2006-01-02"),
-			ChangeFreq: "monthly",
-			Priority:   "0.5",
-		})
-	}
-
-	urlSet := URLSet{URLs: urls}
-
-	output, err := xml.MarshalIndent(urlSet, "", "  ")
-	if err != nil {
-		c.Status(http.StatusInternalServerError)
-		return
-	}
-
-	finalXML := []byte(xml.Header + string(output))
-
-	// Update Cache
-	sitemapMutex.Lock()
-	sitemapCache = finalXML
-	sitemapRefreshed = time.Now()
-	sitemapMutex.Unlock()
-
 	c.Header("Content-Type", "application/xml")
-	c.Writer.Write(finalXML)
+
+	var snippets []models.Snippet
+	database.DB.Select("id, updated_at").Where("visibility = ?", "PUBLIC").Find(&snippets)
+
+	var users []models.User
+	database.DB.Select("username, updated_at").Where("visibility = ?", "PUBLIC").Find(&users)
+
+	xml := `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+	<url>
+		<loc>https://codestudio.dev/</loc>
+		<changefreq>daily</changefreq>
+		<priority>1.0</priority>
+	</url>
+	<url>
+		<loc>https://codestudio.dev/auth/signin</loc>
+		<changefreq>monthly</changefreq>
+		<priority>0.8</priority>
+	</url>
+	<url>
+		<loc>https://codestudio.dev/changelog</loc>
+		<changefreq>weekly</changefreq>
+		<priority>0.7</priority>
+	</url>`
+
+	// Add Snippets
+	for _, s := range snippets {
+		xml += fmt.Sprintf(`
+	<url>
+		<loc>https://codestudio.dev/snippets/%s</loc>
+		<lastmod>%s</lastmod>
+		<changefreq>weekly</changefreq>
+		<priority>0.6</priority>
+	</url>`, s.ID, s.UpdatedAt.Format(time.RFC3339))
+	}
+
+	// Add Users
+	for _, u := range users {
+		xml += fmt.Sprintf(`
+	<url>
+		<loc>https://codestudio.dev/u/%s</loc>
+		<lastmod>%s</lastmod>
+		<changefreq>weekly</changefreq>
+		<priority>0.5</priority>
+	</url>`, u.Username, u.UpdatedAt.Format(time.RFC3339))
+	}
+
+	xml += `
+</urlset>`
+
+	c.String(http.StatusOK, xml)
 }
 
-// GenerateRobotsTXT returns the robots.txt file
+// GenerateRobotsTXT generates a dynamic robots.txt
 func GenerateRobotsTXT(c *gin.Context) {
-	robots := `User-agent: *
-Allow: /
-Disallow: /login
-Disallow: /register
-Disallow: /admin
-Disallow: /chat
-Disallow: /api
-Disallow: /settings
-Disallow: /auth
-
-Sitemap: https://codestudio.appnity.cloud/sitemap.xml`
-
 	c.Header("Content-Type", "text/plain")
-	c.String(http.StatusOK, robots)
+
+	txt := `User-agent: *
+Allow: /
+Disallow: /admin/
+Disallow: /settings/
+Disallow: /api/
+
+Sitemap: https://codestudio.dev/sitemap.xml
+`
+	c.String(http.StatusOK, txt)
 }

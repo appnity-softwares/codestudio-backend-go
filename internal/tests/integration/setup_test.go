@@ -47,25 +47,37 @@ func setupTestDB(t *testing.T) *gorm.DB {
 	// 3. Connect to the new Test DB
 	testDSN := fmt.Sprintf("postgres://pushp314:@localhost:5432/%s?sslmode=disable", testDBName)
 	testDB, err := gorm.Open(postgres.Open(testDSN), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Error), // Show errors
+		Logger:                                   logger.Default.LogMode(logger.Error), // Show errors
+		DisableForeignKeyConstraintWhenMigrating: true,
 	})
 	if err != nil {
 		t.Fatalf("Failed to connect to test DB: %v", err)
 	}
 
 	// 4. Run Migrations
-	// Ensure you include ALL models needed for the arena flow
+	// Enable UUID extension
+	if err := testDB.Exec("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\"").Error; err != nil {
+		t.Fatalf("Failed to enable uuid-ossp extension: %v", err)
+	}
+
+	// Ensure User is created first
+	if err := testDB.AutoMigrate(&models.User{}); err != nil {
+		t.Fatalf("Failed to migrate User table: %v", err)
+	}
+
 	err = testDB.AutoMigrate(
-		&models.User{},
 		&models.Event{},
 		&models.Problem{},
-		&models.TestCase{}, // Ensure this exists if separate, otherwise it's part of Problem?
-		// Checked problem.go earlier, TestCase might be struct inside or separate.
-		// Looking at task.md "Problem model (with test cases)", likely gorm generic.
-		// Let's check models shortly. For now include basics.
+		&models.TestCase{},
 		&models.Registration{},
 		&models.Submission{},
-		&models.Snippet{}, // Required for User fk sometimes if referenced
+		&models.SubmissionMetrics{},
+		&models.SubmissionFlag{},
+		&models.Snippet{},
+		&models.UserBadge{},
+		&models.Badge{},
+		&models.SystemSettings{},
+		&models.FeedbackMessage{}, // Added model
 	)
 	if err != nil {
 		t.Fatalf("Failed to migrate test DB: %v", err)

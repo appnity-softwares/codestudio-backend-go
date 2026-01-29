@@ -106,6 +106,30 @@ func ListSnippets(c *gin.Context) {
 		return
 	}
 
+	// Populate IsLiked for authenticated users
+	if userID, exists := c.Get("userId"); exists {
+		var snippetIDs []string
+		for _, s := range snippets {
+			snippetIDs = append(snippetIDs, s.ID)
+		}
+
+		if len(snippetIDs) > 0 {
+			var likes []models.SnippetLike
+			database.DB.Select("snippet_id").Where("user_id = ? AND snippet_id IN ?", userID, snippetIDs).Find(&likes)
+
+			likedMap := make(map[string]bool)
+			for _, l := range likes {
+				likedMap[l.SnippetID] = true
+			}
+
+			for i := range snippets {
+				if likedMap[snippets[i].ID] {
+					snippets[i].IsLiked = true
+				}
+			}
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{"snippets": snippets})
 }
 
@@ -190,13 +214,20 @@ func GetSnippet(c *gin.Context) {
 	id := c.Param("id")
 	var snippet models.Snippet
 
-	if result := database.DB.Preload("Author").Preload("ForkedFrom").First(&snippet, "id = ?", id); result.Error != nil {
+	if result := database.DB.Preload("Author").First(&snippet, "id = ?", id); result.Error != nil {
 		if result.Error == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Snippet not found"})
 		} else {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
 		}
 		return
+	}
+
+	// Populate IsLiked for authenticated users
+	if userID, exists := c.Get("userId"); exists {
+		var count int64
+		database.DB.Model(&models.SnippetLike{}).Where("user_id = ? AND snippet_id = ?", userID, snippet.ID).Count(&count)
+		snippet.IsLiked = count > 0
 	}
 
 	c.JSON(http.StatusOK, gin.H{"snippet": snippet})
@@ -461,18 +492,49 @@ func PublishSnippet(c *gin.Context) {
 func GetFeed(c *gin.Context) {
 	bucket := c.DefaultQuery("bucket", "trending")
 
+	// Identify Viewer for Blocking Logic
+	var viewerID string
+	if id, exists := c.Get("userId"); exists {
+		viewerID = id.(string)
+	} else {
+		authHeader := c.GetHeader("Authorization")
+		if len(authHeader) > 7 && authHeader[:7] == "Bearer " {
+			if claims, err := utils.ValidateToken(authHeader[7:]); err == nil {
+				viewerID = claims.UserID
+			}
+		}
+	}
+
 	var snippets []models.Snippet
 	query := database.DB.Model(&models.Snippet{}).
 		Preload("Author").
-		Preload("ForkedFrom").
 		Where("status = ?", "PUBLISHED")
+
+	// Apply Blocking Filter
+	if viewerID != "" {
+		var blocks []models.UserBlock
+		database.DB.Where("blocker_id = ? OR blocked_id = ?", viewerID, viewerID).Find(&blocks)
+
+		var excludedIDs []string
+		for _, b := range blocks {
+			if b.BlockerID == viewerID {
+				excludedIDs = append(excludedIDs, b.BlockedID)
+			} else {
+				excludedIDs = append(excludedIDs, b.BlockerID)
+			}
+		}
+
+		if len(excludedIDs) > 0 {
+			query = query.Where("\"authorId\" NOT IN ?", excludedIDs)
+		}
+	}
 
 	switch bucket {
 	case "trending":
-		// Score = (forkCount * 5) + copyCount * 2 + viewsCount - (hours_since_post * 0.05)
+		// Score = copyCount * 2 + viewsCount - (hours_since_post * 0.05)
 		query = query.
 			Where("\"createdAt\" > NOW() - INTERVAL '30 days'").
-			Order("(fork_count * 5 + copy_count * 2 + views_count - EXTRACT(EPOCH FROM (NOW() - \"createdAt\"))/3600 * 0.05) DESC")
+			Order("(copy_count * 2 + views_count - EXTRACT(EPOCH FROM (NOW() - \"createdAt\"))/3600 * 0.05) DESC")
 	case "new":
 		query = query.Order("\"createdAt\" DESC")
 	case "editor":
@@ -486,104 +548,31 @@ func GetFeed(c *gin.Context) {
 		return
 	}
 
+	// Populate IsLiked for authenticated users
+	if userID, exists := c.Get("userId"); exists {
+		var snippetIDs []string
+		for _, s := range snippets {
+			snippetIDs = append(snippetIDs, s.ID)
+		}
+
+		if len(snippetIDs) > 0 {
+			var likes []models.SnippetLike
+			database.DB.Select("snippet_id").Where("user_id = ? AND snippet_id IN ?", userID, snippetIDs).Find(&likes)
+
+			likedMap := make(map[string]bool)
+			for _, l := range likes {
+				likedMap[l.SnippetID] = true
+			}
+
+			for i := range snippets {
+				if likedMap[snippets[i].ID] {
+					snippets[i].IsLiked = true
+				}
+			}
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{"snippets": snippets, "bucket": bucket})
-}
-
-// ForkSnippet handles POST /api/snippets/:id/fork
-// Creates a copy of the snippet under the current user's ownership
-func ForkSnippet(c *gin.Context) {
-	sourceID := c.Param("id")
-	userID, exists := c.Get("userId")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-		return
-	}
-
-	var source models.Snippet
-	if err := database.DB.First(&source, "id = ?", sourceID).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Snippet not found"})
-		return
-	}
-
-	// Check if forking is allowed
-	if !source.AllowForks {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Forking is disabled for this snippet"})
-		return
-	}
-
-	// Check if user has already forked this snippet (Max 3)
-	var existingForks int64
-	database.DB.Model(&models.Snippet{}).
-		Where("author_id = ? AND forked_from_id = ?", userID.(string), sourceID).
-		Count(&existingForks)
-
-	if existingForks >= 3 {
-		c.JSON(http.StatusTooManyRequests, gin.H{"error": "You cannot fork the same snippet more than 3 times"})
-		return
-	}
-
-	// CHECK SYSTEM SETTING: Snippet Creation
-	var setting models.SystemSettings
-	if err := database.DB.Where("key = ?", models.SettingSnippetsEnabled).First(&setting).Error; err == nil {
-		if setting.Value == "false" {
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"error": "Snippet creation is currently disabled by administrators.",
-			})
-			return
-		}
-	}
-
-	// Create the fork
-	fork := models.Snippet{
-		ID:           utils.GenerateID(),
-		Title:        source.Title + " (Fork)",
-		Description:  source.Description,
-		Language:     source.Language,
-		Code:         source.Code,
-		Tags:         source.Tags,
-		AuthorID:     userID.(string),
-		ForkedFromID: &sourceID,
-		Visibility:   "public",
-		PreviewType:  source.PreviewType,
-		Type:         source.Type,
-		Difficulty:   source.Difficulty,
-		Status:       "DRAFT", // Forks start as drafts
-		Verified:     false,
-		ViewsCount:   0,
-		CopyCount:    0,
-		ForkCount:    0,
-	}
-
-	// Transaction: Create fork + Increment source fork count
-	tx := database.DB.Begin()
-	if err := tx.Create(&fork).Error; err != nil {
-		tx.Rollback()
-		if strings.Contains(err.Error(), "duplicate key") {
-			c.JSON(http.StatusConflict, gin.H{"error": "A fork with this title already exists"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create fork"})
-		return
-	}
-
-	if err := tx.Model(&source).Update("fork_count", gorm.Expr("fork_count + 1")).Error; err != nil {
-		tx.Rollback()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update fork count"})
-		return
-	}
-
-	tx.Commit()
-
-	// Reward XP for forking
-	// Forker gets 25 XP
-	database.DB.Model(&models.User{}).Where("id = ?", userID.(string)).Update("xp", gorm.Expr("xp + ?", 25))
-	// Original author gets 10 XP
-	database.DB.Model(&models.User{}).Where("id = ?", source.AuthorID).Update("xp", gorm.Expr("xp + ?", 10))
-
-	// Preload author for response
-	database.DB.Preload("Author").First(&fork, "id = ?", fork.ID)
-
-	c.JSON(http.StatusCreated, gin.H{"snippet": fork, "message": "Snippet forked successfully"})
 }
 
 // RecordSnippetCopy handles POST /api/snippets/:id/copy
