@@ -30,3 +30,7 @@ go.work
 # Build artifacts
 /cmd/server/server
 /server
+
+# Logs
+backend.log
+*.log
