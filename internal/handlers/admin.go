@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/pushp314/devconnect-backend/internal/database"
 	"github.com/pushp314/devconnect-backend/internal/models"
 	"gorm.io/gorm"
@@ -431,9 +432,21 @@ func AdminGrantUserXP(c *gin.Context) {
 	}
 
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
-		// Update User XP
-		if err := tx.Model(&models.User{}).Where("id = ?", userID).
-			Update("xp", gorm.Expr("GREATEST(xp + ?, 0)", req.Amount)).Error; err != nil {
+		var user models.User
+		if err := tx.First(&user, "id = ?", userID).Error; err != nil {
+			return err
+		}
+
+		// Update XP
+		user.XP = int(float64(user.XP) + float64(req.Amount))
+		if user.XP < 0 {
+			user.XP = 0
+		}
+
+		// Recalculate Level
+		user.SyncLevelXP("XP")
+
+		if err := tx.Model(&user).Updates(map[string]interface{}{"xp": user.XP, "level": user.Level}).Error; err != nil {
 			return err
 		}
 
@@ -798,13 +811,17 @@ func AdminUpdateUser(c *gin.Context) {
 	adminID := getAdminID(c)
 
 	var req struct {
-		Name       string `json:"name"`
-		Username   string `json:"username"`
-		Bio        string `json:"bio"`
-		Email      string `json:"email"`
-		Role       string `json:"role"`
-		TrustScore int    `json:"trustScore"`
-		IsBlocked  bool   `json:"isBlocked"`
+		Name         string         `json:"name"`
+		Username     string         `json:"username"`
+		Bio          string         `json:"bio"`
+		Email        string         `json:"email"`
+		Role         string         `json:"role"`
+		TrustScore   int            `json:"trustScore"`
+		IsBlocked    bool           `json:"isBlocked"`
+		XP           int            `json:"xp"`
+		Level        int            `json:"level"`
+		EquippedAura string         `json:"equippedAura"`
+		Endorsements pq.StringArray `json:"endorsements"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -826,14 +843,27 @@ func AdminUpdateUser(c *gin.Context) {
 			}
 		}
 
+		// Handle XP/Level Sync
+		if req.Level != user.Level {
+			user.Level = req.Level
+			user.SyncLevelXP("Level")
+		} else if req.XP != user.XP {
+			user.XP = req.XP
+			user.SyncLevelXP("XP")
+		}
+
 		updates := map[string]interface{}{
-			"name":        req.Name,
-			"username":    req.Username,
-			"bio":         req.Bio,
-			"email":       req.Email,
-			"role":        models.Role(req.Role),
-			"trust_score": req.TrustScore,
-			"is_blocked":  req.IsBlocked,
+			"name":         req.Name,
+			"username":     req.Username,
+			"bio":          req.Bio,
+			"email":        req.Email,
+			"role":         models.Role(req.Role),
+			"trust_score":  req.TrustScore,
+			"is_blocked":   req.IsBlocked,
+			"xp":           user.XP,
+			"level":        user.Level,
+			"equippedAura": req.EquippedAura,
+			"endorsements": req.Endorsements,
 		}
 
 		if err := tx.Model(&user).Updates(updates).Error; err != nil {
@@ -1023,6 +1053,11 @@ func AdminUpdateSystemSettings(c *gin.Context) {
 
 	logAdminAction(database.DB, adminID, models.ActionAdjustTrust, req.Key, "system", "Changed to: "+req.Value)
 
+	// If maintenance mode toggled, broadcast to all sockets
+	if req.Key == models.SettingMaintenanceMode && SocketServer != nil {
+		SocketServer.BroadcastToRoom("/", "", "maintenance_toggle", gin.H{"enabled": req.Value == "true"})
+	}
+
 	c.JSON(http.StatusOK, gin.H{"message": "Setting updated", "setting": setting})
 }
 
@@ -1046,9 +1081,13 @@ func PublicGetSystemStatus(c *gin.Context) {
 		models.SettingBannerContent,
 		models.SettingBannerLink,
 		models.SettingFeatureGithubStats,
-		models.SettingFeatureSocialChat,
-		models.SettingFeatureSocialFollow,
 		models.SettingFeatureSocialFeed,
+		models.SettingFeatureNotificationsEnabled,
+		models.SettingFeatureSidebarLeaderboard,
+		models.SettingFeatureQuestsEnabled,
+		models.SettingFeatureGithubStats,
+		models.SettingFeatureSidebarNewBadge,
+		"custom_auras",
 	}).Find(&settings)
 
 	settingsMap := make(map[string]string)
@@ -1183,4 +1222,51 @@ func AdminResolveReport(c *gin.Context) {
 	logAdminAction(database.DB, adminID, models.ActionManageModeration, "report", report.ID, "Resolved report with status: "+input.Status)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Report updated successfully"})
+}
+
+// AdminSendMessageToUser sends an officially highlighted message from the platform
+func AdminSendMessageToUser(c *gin.Context) {
+	adminID := getAdminID(c)
+	targetUserID := c.Param("id")
+
+	var req struct {
+		Content string `json:"content" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Content is required"})
+		return
+	}
+
+	// 1. Build an "admin" type message
+	msg := models.Message{
+		SenderID:    adminID,
+		RecipientID: targetUserID,
+		Content:     req.Content,
+		Type:        "admin", // Special type for highlighting
+		Status:      "sent",
+		CreatedAt:   time.Now(),
+	}
+
+	// 2. Persist to database
+	if err := database.DB.Create(&msg).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send admin message"})
+		return
+	}
+
+	// 3. Real-time emission
+	if SocketServer != nil {
+		go func(m models.Message) {
+			database.DB.Preload("Sender").Preload("Recipient").First(&m, "id = ?", m.ID)
+			data := map[string]interface{}{
+				"message": m,
+			}
+			SocketServer.BroadcastToRoom("/", m.RecipientID, "receive_message", data)
+			SocketServer.BroadcastToRoom("/", m.SenderID, "receive_message", data)
+		}(msg)
+	}
+
+	// 4. Log action
+	logAdminAction(database.DB, adminID, models.ActionUpdateUser, targetUserID, "user", "Sent Admin Message")
+
+	c.JSON(http.StatusOK, gin.H{"message": "Admin message sent", "chatMessage": msg})
 }

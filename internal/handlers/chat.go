@@ -218,21 +218,27 @@ func SendMessage(c *gin.Context) {
 		return
 	}
 
-	// 9. Populate relations for return
-	database.DB.Preload("Sender").Preload("Recipient").First(&msg, "id = ?", msg.ID)
-
-	// 10. Real-time emission
+	// 10. Real-time emission (ASYNCHRONOUS)
 	if SocketServer != nil {
-		data := map[string]interface{}{
-			"message": msg,
-		}
-		// Send to recipient
-		SocketServer.BroadcastToRoom("/", msg.RecipientID, "receive_message", data)
-		// Send to sender for multi-device sync
-		SocketServer.BroadcastToRoom("/", msg.SenderID, "receive_message", data)
+		go func(m models.Message) {
+			// Preload for recipients only in the background
+			database.DB.Preload("Sender").Preload("Recipient").First(&m, "id = ?", m.ID)
+			data := map[string]interface{}{
+				"message": m,
+			}
+			// Send to recipient
+			SocketServer.BroadcastToRoom("/", m.RecipientID, "receive_message", data)
+			// Send to sender for multi-device sync
+			SocketServer.BroadcastToRoom("/", m.SenderID, "receive_message", data)
+		}(msg)
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": msg})
+	// 11. Minimal speed response (No preloads for the sender, client already has the data)
+	c.JSON(http.StatusOK, gin.H{
+		"message":      msg,
+		"deduplicated": false,
+		"speed":        "ultra",
+	})
 }
 
 // MarkRead marks messages from a sender as read

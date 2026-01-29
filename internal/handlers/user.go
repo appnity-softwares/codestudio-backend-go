@@ -482,9 +482,59 @@ func GetPublicProfile(c *gin.Context) {
 		"linkersCount":         user.LinkersCount,
 		"linkedCount":          user.LinkedCount,
 		"xp":                   user.XP,
+		"equippedAura":         user.EquippedAura,
 	}
 
 	c.JSON(http.StatusOK, gin.H{"user": safeUser})
+}
+
+// EquipAura handles POST /users/profile/equip-aura
+func EquipAura(c *gin.Context) {
+	userId, exists := c.Get("userId")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	var input struct {
+		AuraID string `json:"auraId"` // Can be empty to unequip
+	}
+
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
+		return
+	}
+
+	var user models.User
+	if err := database.DB.First(&user, "id = ?", userId).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	// Verify ownership if it's a specific aura (not empty)
+	if input.AuraID != "" {
+		owned := false
+		for _, id := range user.PurchasedComponentIds {
+			if id == input.AuraID {
+				owned = true
+				break
+			}
+		}
+
+		// Allow equipping if it's one of the base/legacy auras too?
+		// Actually XPStore.tsx only handles purchased ones via equip.
+		if !owned {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Item not owned"})
+			return
+		}
+	}
+
+	if err := database.DB.Model(&user).Update("equippedAura", input.AuraID).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to equip aura"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Aura updated successfully", "equippedAura": input.AuraID})
 }
 
 // ListCommunityUsers handles GET /community/users
@@ -1055,4 +1105,54 @@ func SpendXP(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Item unlocked successfully", "xp": user.XP, "purchasedIds": user.PurchasedComponentIds})
+}
+
+// GenerateVaultKey handles POST /api/users/vault/key
+func GenerateVaultKey(c *gin.Context) {
+	userId, exists := c.Get("userId")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	var user models.User
+	if err := database.DB.First(&user, "id = ?", userId).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	// Format: VAULT-USERNAME-XXXX
+	randomSuffix := utils.GenerateID()[:4]
+	vaultKey := fmt.Sprintf("VAULT-%s-%s", user.Username, randomSuffix)
+
+	user.VaultKey = vaultKey
+	if err := database.DB.Model(&user).Update("vaultKey", vaultKey).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save vault key"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"vaultKey": vaultKey})
+}
+
+// VerifyVaultKey handles POST /api/users/vault/verify
+func VerifyVaultKey(c *gin.Context) {
+	var input struct {
+		Key string `json:"key" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+
+	var user models.User
+	if err := database.DB.Where("\"vaultKey\" = ?", input.Key).First(&user).Error; err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Invalid Vault Key Protocol"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"username": user.Username,
+		"message":  "Handshake Success",
+	})
 }

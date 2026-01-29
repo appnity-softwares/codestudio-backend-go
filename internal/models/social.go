@@ -177,3 +177,24 @@ func (r *Report) BeforeCreate(tx *gorm.DB) (err error) {
 	}
 	return
 }
+
+// Appeal represents a suspension appeal from a user
+type Appeal struct {
+	ID        string    `gorm:"primaryKey;type:text" json:"id"`
+	Email     string    `json:"email"`
+	Username  string    `json:"username"`
+	Reason    string    `json:"reason"`
+	Status    string    `gorm:"default:'PENDING'" json:"status"` // PENDING, REVIEWED, RESOLVED
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+func (Appeal) TableName() string {
+	return "Appeal"
+}
+
+func (a *Appeal) BeforeCreate(tx *gorm.DB) (err error) {
+	if a.ID == "" {
+		a.ID = uuid.New().String()
+	}
+	return
+}

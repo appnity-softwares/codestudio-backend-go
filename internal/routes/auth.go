@@ -24,4 +24,5 @@ func RegisterAuthRoutes(r gin.IRouter) {
 
 	// Utils
 	r.GET("/check-username", handlers.CheckUsername)
+	r.POST("/appeal", handlers.CreateAppeal)
 }

@@ -16,6 +16,7 @@ func RegisterUserRoutes(r gin.IRouter) {
 			protected.GET("/stats", handlers.GetStats)
 			protected.GET("", handlers.GetProfile)
 			protected.PUT("", handlers.UpdateProfile)
+			protected.POST("/equip-aura", handlers.EquipAura)
 			protected.POST("/github/sync", handlers.SyncGithubStats)
 		}
 
@@ -33,6 +34,10 @@ func RegisterUserRoutes(r gin.IRouter) {
 		// Onboarding (Authenticated)
 		users.POST("/onboarding", middleware.AuthMiddleware(), handlers.CompleteOnboarding)
 		users.POST("/spend-xp", middleware.AuthMiddleware(), handlers.SpendXP)
+
+		// Vault Handshake
+		users.POST("/vault/key", middleware.AuthMiddleware(), handlers.GenerateVaultKey)
+		users.POST("/vault/verify", handlers.VerifyVaultKey)
 	}
 
 	// Community & Public Profile Routes (Root under /api usually)

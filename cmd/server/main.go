@@ -91,6 +91,7 @@ func main() {
 		&models.LinkRequest{},
 		&models.UserBlock{},
 		&models.Report{},
+		&models.Appeal{},
 		// Phase 7: Chat Reactions & Mentions
 		&models.MessageReaction{},
 		&models.Mention{},
@@ -116,11 +117,18 @@ func main() {
 		logger.Fatal().Err(err).Msg("Failed to run raw SQL migrations")
 	}
 
-	// Initialize Default Settings if missing
 	defaultSettings := map[string]string{
-		models.SettingFeatureSocialChat:   "true",
-		models.SettingFeatureSocialFollow: "true",
-		models.SettingFeatureSocialFeed:   "true",
+		models.SettingFeatureSocialChat:           "true",
+		models.SettingFeatureSocialFollow:         "true",
+		models.SettingFeatureSocialFeed:           "true",
+		models.SettingFeatureNotificationsEnabled: "true",
+		models.SettingFeatureSidebarLeaderboard:   "true",
+		models.SettingFeatureSidebarPractice:      "true",
+		models.SettingFeatureSidebarCommunity:     "true",
+		models.SettingFeatureSidebarFeedback:      "true",
+		models.SettingFeatureSidebarRoadmaps:      "true",
+		models.SettingFeatureSidebarTrophyRoom:    "true",
+		models.SettingFeatureSidebarXPStore:       "true",
 	}
 	for k, v := range defaultSettings {
 		var count int64

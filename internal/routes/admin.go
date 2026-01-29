@@ -34,6 +34,7 @@ func RegisterAdminRoutes(rg *gin.RouterGroup) {
 		users.POST("/:id/ban-contest", handlers.AdminBanContest)
 		users.POST("/:id/trust", handlers.AdminAdjustTrustScore)
 		users.POST("/:id/grant-xp", handlers.AdminGrantUserXP)
+		users.POST("/:id/message", handlers.AdminSendMessageToUser)
 		users.PUT("/:id", handlers.AdminUpdateUser)
 		users.DELETE("/:id", handlers.AdminDeleteUser)
 	}
@@ -101,9 +102,6 @@ func RegisterAdminRoutes(rg *gin.RouterGroup) {
 		moderation.POST("/avatars", handlers.AdminAddAvatarSeed)
 		moderation.DELETE("/avatars/:id", handlers.AdminDeleteAvatarSeed)
 
-		// Community Reports (New)
-		moderation.GET("/reports", handlers.AdminGetReports)
-		moderation.POST("/reports/:id/resolve", handlers.AdminResolveReport)
 	}
 
 	// Audit Logs (Granular Permission)
@@ -144,5 +142,13 @@ func RegisterAdminRoutes(rg *gin.RouterGroup) {
 		restricted.POST("/feedback/:id/hide", handlers.AdminHideFeedback)
 		restricted.POST("/feedback/:id/pin", handlers.AdminPinFeedback)
 		restricted.POST("/feedback/:id/convert", handlers.AdminConvertToChangelog)
+
+		// Community Reports
+		restricted.GET("/reports", handlers.AdminGetReports)
+		restricted.POST("/reports/:id/resolve", handlers.AdminResolveReport)
+
+		// Appeals
+		restricted.GET("/appeals", handlers.AdminGetAppeals)
+		restricted.PUT("/appeals/:id", handlers.AdminUpdateAppealStatus)
 	}
 }

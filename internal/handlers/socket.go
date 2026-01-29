@@ -14,7 +14,6 @@ import (
 	"github.com/googollee/go-socket.io/engineio/transport/polling"
 	"github.com/googollee/go-socket.io/engineio/transport/websocket"
 	"github.com/pushp314/devconnect-backend/internal/database"
-	"github.com/pushp314/devconnect-backend/internal/models"
 	"github.com/pushp314/devconnect-backend/pkg/utils"
 )
 
@@ -74,10 +73,10 @@ func BroadcastPresenceUpdate(userId string, isOnline bool) {
 func InitSocketServer() *socketio.Server {
 	server := socketio.NewServer(&engineio.Options{
 		Transports: []transport.Transport{
-			&polling.Transport{
+			&websocket.Transport{
 				CheckOrigin: func(r *http.Request) bool { return true },
 			},
-			&websocket.Transport{
+			&polling.Transport{
 				CheckOrigin: func(r *http.Request) bool { return true },
 			},
 		},
@@ -108,6 +107,9 @@ func InitSocketServer() *socketio.Server {
 
 		userId := claims.UserID
 		log.Println("Socket authenticated:", s.ID(), "User:", userId)
+
+		// Optimization: Store userId directly in socket context for O(1) lookup
+		s.SetContext(userId)
 
 		// Track user as online
 		onlineUsersMu.Lock()
@@ -141,36 +143,29 @@ func InitSocketServer() *socketio.Server {
 		}
 
 		if recipientID != "" {
-			// Find who is typing (from socket context or map)
-			senderID := ""
-			onlineUsersMu.RLock()
-			for uid, sid := range onlineUsers {
-				if sid == s.ID() {
-					senderID = uid
-					break
-				}
+			// Find who is typing (O(1) from socket context)
+			senderID, _ := s.Context().(string)
+			if senderID == "" {
+				return
 			}
-			onlineUsersMu.RUnlock()
 
 			// THROTTLE: Only emit if 3s since last emit for this sender
-			if senderID != "" {
-				lastTypingMu.RLock()
-				lastTime, exists := lastTypingEmit[senderID]
-				lastTypingMu.RUnlock()
+			lastTypingMu.RLock()
+			lastTime, exists := lastTypingEmit[senderID]
+			lastTypingMu.RUnlock()
 
-				if exists && time.Since(lastTime) < typingThrottleDuration {
-					return // Throttled - skip this event
-				}
-
-				lastTypingMu.Lock()
-				lastTypingEmit[senderID] = time.Now()
-				lastTypingMu.Unlock()
-
-				server.BroadcastToRoom("/", recipientID, "user_typing", map[string]interface{}{
-					"userId":    senderID,
-					"expiresAt": time.Now().Add(4 * time.Second).Unix(), // Auto-expire on client
-				})
+			if exists && time.Since(lastTime) < typingThrottleDuration {
+				return // Throttled - skip this event
 			}
+
+			lastTypingMu.Lock()
+			lastTypingEmit[senderID] = time.Now()
+			lastTypingMu.Unlock()
+
+			server.BroadcastToRoom("/", recipientID, "user_typing", map[string]interface{}{
+				"userId":    senderID,
+				"expiresAt": time.Now().Add(4 * time.Second).Unix(), // Auto-expire on client
+			})
 		}
 	})
 
@@ -193,23 +188,22 @@ func InitSocketServer() *socketio.Server {
 			return
 		}
 
-		// Update message status in DB
-		updates := map[string]interface{}{"status": status}
-		if status == "read" {
-			now := time.Now()
-			updates["is_read"] = true
-			updates["read_at"] = &now
-		}
-
-		if err := database.DB.Model(&models.Message{}).Where("id = ?", messageID).Updates(updates).Error; err != nil {
-			log.Printf("[Socket] Failed to update message status: %v", err)
-			return
-		}
-
 		// Notify sender that message was delivered/read
-		var msg models.Message
-		if err := database.DB.Select("sender_id").First(&msg, "id = ?", messageID).Error; err == nil {
-			server.BroadcastToRoom("/", msg.SenderID, "message_status", map[string]interface{}{
+		// Use minimal DB hit: only get sender_id
+		var senderID string
+		if err := database.DB.Table("messages").Select("sender_id").Where("id = ?", messageID).Scan(&senderID).Error; err == nil && senderID != "" {
+			// Update status in background to respond faster to socket
+			go func(mid string, st string) {
+				updates := map[string]interface{}{"status": st}
+				if st == "read" {
+					now := time.Now()
+					updates["is_read"] = true
+					updates["read_at"] = &now
+				}
+				database.DB.Table("messages").Where("id = ?", mid).Updates(updates)
+			}(messageID, status)
+
+			server.BroadcastToRoom("/", senderID, "message_status", map[string]interface{}{
 				"messageId": messageID,
 				"status":    status,
 			})

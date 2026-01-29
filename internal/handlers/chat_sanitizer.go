@@ -72,6 +72,7 @@ func ValidateMessageType(msgType string) bool {
 		"code":   true,
 		"image":  true,
 		"system": true,
+		"admin":  true,
 	}
 	return validTypes[msgType]
 }

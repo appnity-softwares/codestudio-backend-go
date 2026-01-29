@@ -23,6 +23,8 @@ const (
 	VisibilityHybrid  Visibility = "HYBRID"
 )
 
+const XPPerLevel = 1000 // 1000 XP per level
+
 type User struct {
 	ID        string         `gorm:"primaryKey;type:text" json:"id"`
 	CreatedAt time.Time      `gorm:"column:createdAt" json:"createdAt"`
@@ -39,6 +41,7 @@ type User struct {
 	InstagramURL  string     `gorm:"column:instagramUrl" json:"instagramUrl"`
 	LinkedInURL   string     `gorm:"column:linkedinUrl" json:"linkedinUrl"`
 	IsBlocked     bool       `gorm:"default:false" json:"isBlocked"`
+	VaultKey      string     `gorm:"column:vaultKey" json:"vaultKey"`
 
 	// Enums stored as strings
 	Role       Role       `gorm:"type:text;default:'USER'" json:"role"`
@@ -74,10 +77,12 @@ type User struct {
 	GithubStatsVisible   bool `gorm:"default:true;column:githubStatsVisible" json:"githubStatsVisible"`
 
 	// Cached Counters (for Leaderboard/Community performance)
-	WrappedSnippetCount int `gorm:"default:0;column:snippet_count" json:"snippetCount"`
-	WrappedViewCount    int `gorm:"default:0;column:view_count" json:"viewCount"`
-	WrappedContestCount int `gorm:"default:0;column:contest_count" json:"contestCount"`
-	XP                  int `gorm:"default:0" json:"xp"`
+	WrappedSnippetCount int    `gorm:"default:0;column:snippet_count" json:"snippetCount"`
+	WrappedViewCount    int    `gorm:"default:0;column:view_count" json:"viewCount"`
+	WrappedContestCount int    `gorm:"default:0;column:contest_count" json:"contestCount"`
+	XP                  int    `gorm:"default:0" json:"xp"`
+	Level               int    `gorm:"default:1" json:"level"`
+	EquippedAura        string `gorm:"column:equippedAura" json:"equippedAura"`
 
 	// Social & Engagement (Cached)
 	LinkersCount int `gorm:"default:0;column:linkersCount" json:"linkersCount"` // Followers
@@ -107,4 +112,19 @@ type UserCount struct {
 // To be safe, let's verify later. For now assume "User".
 func (User) TableName() string {
 	return "User"
+}
+
+// SyncLevelXP ensures XP and Level are consistent.
+// If mode is "XP", Level is updated based on XP.
+// If mode is "Level", XP is updated to the minimum XP for that level if current XP is lower.
+func (u *User) SyncLevelXP(mode string) {
+	switch mode {
+	case "XP":
+		u.Level = (u.XP / XPPerLevel) + 1
+	case "Level":
+		minXP := (u.Level - 1) * XPPerLevel
+		if u.XP < minXP {
+			u.XP = minXP
+		}
+	}
 }

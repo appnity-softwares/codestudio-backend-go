@@ -84,8 +84,8 @@ var (
 	// Contest submission: 20 per minute
 	SubmitLimiter = NewIPRateLimiter(rate.Limit(20.0/60.0), 5)
 
-	// Chat messages: 30 per minute (prevents spam, allows normal conversation)
-	ChatLimiter = NewIPRateLimiter(rate.Limit(30.0/60.0), 10)
+	// Chat messages: 300 per minute (5/sec) - allows rapid testing and fast conversations
+	ChatLimiter = NewIPRateLimiter(rate.Limit(5.0), 20)
 )
 
 // RateLimitMiddleware creates a rate limiting middleware with a custom limiter

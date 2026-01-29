@@ -1,16 +1,25 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"image"
+	"io"
 	"net/http"
 	"path/filepath"
+	"strings"
+
+	_ "image/gif"
+	"image/jpeg"
+	_ "image/png"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/gin-gonic/gin"
+	"github.com/nfnt/resize"
 	appConfig "github.com/pushp314/devconnect-backend/internal/config"
 	"github.com/pushp314/devconnect-backend/pkg/utils"
 )
@@ -61,7 +70,42 @@ func UploadFile(c *gin.Context) {
 	ext := filepath.Ext(header.Filename)
 	key := fmt.Sprintf("%s/%s%s", c.DefaultQuery("folder", "uploads"), utils.GenerateID(), ext)
 
-	// 3. Upload to R2
+	// 3. Process Image if applicable
+	contentType := header.Header.Get("Content-Type")
+	var uploadBody io.Reader = file
+
+	if strings.HasPrefix(contentType, "image/") && contentType != "image/gif" {
+		img, _, err := image.Decode(file)
+		if err == nil {
+			// Resize if wider than 1200px
+			bounds := img.Bounds()
+			if bounds.Dx() > 1200 {
+				img = resize.Resize(1200, 0, img, resize.Lanczos3)
+			}
+
+			// Encode to buffer
+			buf := new(bytes.Buffer)
+			err = jpeg.Encode(buf, img, &jpeg.Options{Quality: 80})
+			if err == nil {
+				uploadBody = buf
+				contentType = "image/jpeg"
+				// Update extension for URL consistency if it was png
+				if strings.HasSuffix(key, ".png") {
+					key = strings.TrimSuffix(key, ".png") + ".jpg"
+				}
+			} else {
+				// Fallback to original if encoding fails
+				file.Seek(0, 0)
+				uploadBody = file
+			}
+		} else {
+			// Fallback to original if decode fails
+			file.Seek(0, 0)
+			uploadBody = file
+		}
+	}
+
+	// 4. Upload to R2
 	client, err := getS3Client()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to init storage client"})
@@ -72,8 +116,8 @@ func UploadFile(c *gin.Context) {
 	_, err = client.PutObject(context.TODO(), &s3.PutObjectInput{
 		Bucket:      aws.String(cfg.R2BucketName),
 		Key:         aws.String(key),
-		Body:        file,
-		ContentType: aws.String(header.Header.Get("Content-Type")),
+		Body:        uploadBody,
+		ContentType: aws.String(contentType),
 	})
 
 	if err != nil {
