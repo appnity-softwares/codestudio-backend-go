@@ -56,6 +56,33 @@ func ListEvents(c *gin.Context) {
 		return
 	}
 
+	eventIDs := make([]string, len(events))
+	for i, e := range events {
+		eventIDs[i] = e.ID
+	}
+
+	// Bulk Participant Counts
+	type CountResult struct {
+		EventID string
+		Count   int64
+	}
+	var countResults []CountResult
+	database.DB.Model(&models.Registration{}).Where("event_id IN ?", eventIDs).Select("event_id, count(*) as count").Group("event_id").Scan(&countResults)
+	countMap := make(map[string]int64)
+	for _, cr := range countResults {
+		countMap[cr.EventID] = cr.Count
+	}
+
+	// Bulk User Registrations
+	regMap := make(map[string]models.RegistrationStatus)
+	if exists {
+		var regs []models.Registration
+		database.DB.Where("user_id = ? AND event_id IN ?", userId, eventIDs).Find(&regs)
+		for _, reg := range regs {
+			regMap[reg.EventID] = reg.Status
+		}
+	}
+
 	var response []EventListResponse
 	now := time.Now()
 
@@ -71,36 +98,22 @@ func ListEvents(c *gin.Context) {
 		}
 
 		if updated {
-			// Update DB asynchronously to avoid blocking read path significantly
-			// Or synchronously if critical. Sync is safer for now.
-			database.DB.Model(&event).Update("status", event.Status)
+			database.DB.Model(&models.Event{}).Where("id = ?", event.ID).Update("status", event.Status)
 		}
 
-		// 1. Count Participants
-		var participantCount int64
-		database.DB.Model(&models.Registration{}).Where("event_id = ?", event.ID).Count(&participantCount)
+		// 1. Participant Count from map
+		participantCount := countMap[event.ID]
 
-		// 2. Count Problems & Points (Already preloaded, so just calc)
+		// 2. Count Problems & Points (Already preloaded)
 		problemCount := int64(len(event.Problems))
 		totalPoints := 0
 		for _, p := range event.Problems {
 			totalPoints += p.Points
 		}
 
-		// 3. Check User Registration
-		isRegistered := false
-		var userStatus models.RegistrationStatus
-		if exists {
-			var reg models.Registration
-			if err := database.DB.Where("user_id = ? AND event_id = ?", userId, event.ID).First(&reg).Error; err == nil {
-				isRegistered = true
-				userStatus = reg.Status
-			}
-		}
+		// 3. User Registration from map
+		userStatus, isRegistered := regMap[event.ID]
 
-		// Strip actual problem details from list view for security/bandwidth
-		// event.Problems = nil // (Optional: GORM might still serialize it if embedded, but we explicitly construct response)
-		// Actually, since we embed models.Event, it will serialize Problems. Let's nil it out to be safe/clean.
 		safeEvent := event
 		safeEvent.Problems = nil
 
@@ -114,6 +127,7 @@ func ListEvents(c *gin.Context) {
 		})
 	}
 
+	c.Header("Cache-Control", "public, max-age=60")
 	c.JSON(http.StatusOK, gin.H{"events": response})
 }
 
