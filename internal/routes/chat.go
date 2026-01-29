@@ -15,7 +15,14 @@ func RegisterChatRoutes(r gin.IRouter) {
 		chat.GET("/contacts", handlers.GetContacts)
 		chat.GET("/conversations", handlers.GetConversations)
 		chat.GET("/messages", handlers.GetMessages) // ?userId=...
-		chat.POST("/messages", handlers.SendMessage)
+		chat.POST("/messages", middleware.ChatRateLimit(), handlers.SendMessage)
 		chat.POST("/read/:senderId", handlers.MarkRead)
+
+		// Phase 7: Reactions
+		chat.POST("/messages/:messageId/reactions", handlers.AddReaction)
+		chat.GET("/messages/:messageId/reactions", handlers.GetReactions)
+
+		// Unread Count
+		chat.GET("/unread/total", handlers.GetTotalUnreadMessages)
 	}
 }

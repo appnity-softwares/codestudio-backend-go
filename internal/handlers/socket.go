@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	socketio "github.com/googollee/go-socket.io"
@@ -12,6 +13,8 @@ import (
 	"github.com/googollee/go-socket.io/engineio/transport"
 	"github.com/googollee/go-socket.io/engineio/transport/polling"
 	"github.com/googollee/go-socket.io/engineio/transport/websocket"
+	"github.com/pushp314/devconnect-backend/internal/database"
+	"github.com/pushp314/devconnect-backend/internal/models"
 	"github.com/pushp314/devconnect-backend/pkg/utils"
 )
 
@@ -21,6 +24,13 @@ var SocketServer *socketio.Server
 var (
 	onlineUsers   = make(map[string]string) // userId -> socketId
 	onlineUsersMu sync.RWMutex
+)
+
+// Typing throttle: track last typing emit per user to prevent spam
+var (
+	lastTypingEmit         = make(map[string]time.Time) // userId -> last emit time
+	lastTypingMu           sync.RWMutex
+	typingThrottleDuration = 3 * time.Second // Minimum interval between typing events
 )
 
 // GetOnlineUsers returns list of online user IDs
@@ -142,9 +152,23 @@ func InitSocketServer() *socketio.Server {
 			}
 			onlineUsersMu.RUnlock()
 
+			// THROTTLE: Only emit if 3s since last emit for this sender
 			if senderID != "" {
+				lastTypingMu.RLock()
+				lastTime, exists := lastTypingEmit[senderID]
+				lastTypingMu.RUnlock()
+
+				if exists && time.Since(lastTime) < typingThrottleDuration {
+					return // Throttled - skip this event
+				}
+
+				lastTypingMu.Lock()
+				lastTypingEmit[senderID] = time.Now()
+				lastTypingMu.Unlock()
+
 				server.BroadcastToRoom("/", recipientID, "user_typing", map[string]interface{}{
-					"userId": senderID,
+					"userId":    senderID,
+					"expiresAt": time.Now().Add(4 * time.Second).Unix(), // Auto-expire on client
 				})
 			}
 		}
@@ -153,6 +177,43 @@ func InitSocketServer() *socketio.Server {
 	// Get online users request
 	server.OnEvent("/", "get_online_users", func(s socketio.Conn, msg string) {
 		s.Emit("online_users", GetOnlineUsers())
+	})
+
+	// Message ACK event - client sends after receiving/reading message
+	server.OnEvent("/", "message_ack", func(s socketio.Conn, data map[string]interface{}) {
+		messageID, _ := data["messageId"].(string)
+		status, _ := data["status"].(string) // "delivered" or "read"
+
+		if messageID == "" || status == "" {
+			return
+		}
+
+		// Validate status
+		if status != "delivered" && status != "read" {
+			return
+		}
+
+		// Update message status in DB
+		updates := map[string]interface{}{"status": status}
+		if status == "read" {
+			now := time.Now()
+			updates["is_read"] = true
+			updates["read_at"] = &now
+		}
+
+		if err := database.DB.Model(&models.Message{}).Where("id = ?", messageID).Updates(updates).Error; err != nil {
+			log.Printf("[Socket] Failed to update message status: %v", err)
+			return
+		}
+
+		// Notify sender that message was delivered/read
+		var msg models.Message
+		if err := database.DB.Select("sender_id").First(&msg, "id = ?", messageID).Error; err == nil {
+			server.BroadcastToRoom("/", msg.SenderID, "message_status", map[string]interface{}{
+				"messageId": messageID,
+				"status":    status,
+			})
+		}
 	})
 
 	server.OnDisconnect("/", func(s socketio.Conn, reason string) {

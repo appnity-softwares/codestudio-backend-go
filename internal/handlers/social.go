@@ -136,10 +136,17 @@ func LinkUser(c *gin.Context) {
 			users[0], users[1] = users[1], users[0]
 		}
 
+		// Track if we should award XP (only for NEW links)
+		shouldAwardXP := err == gorm.ErrRecordNotFound
+
 		for _, u := range users {
-			updateData := map[string]interface{}{
-				"xp": gorm.Expr("xp + 50"),
+			updateData := map[string]interface{}{}
+
+			// Only award XP if it's a fresh link (not a restore)
+			if shouldAwardXP {
+				updateData["xp"] = gorm.Expr("xp + 50")
 			}
+
 			if u.isTarget {
 				updateData["linkersCount"] = gorm.Expr("\"linkersCount\" + 1")
 			} else {
@@ -161,6 +168,9 @@ func LinkUser(c *gin.Context) {
 	}
 
 	// 5. Send Notification (Post-Transaction, Async)
+	// Only send notification if it was a meaningful action (new or restore)
+	// We'll send it regardless to inform user, but maybe change text?
+	// Legacy behavior: Send it.
 	go func(targetID, actorID string) {
 		notification := models.Notification{
 			UserID:  targetID,
@@ -202,17 +212,45 @@ func AcceptLinkRequest(c *gin.Context) {
 			LinkerID: req.SenderID,
 			LinkedID: userID,
 		}
-		if err := tx.Create(&newLink).Error; err != nil {
-			return err
+		// Note: AcceptLinkRequest implies it wasn't a direct public link,
+		// so likely a private profile. Less chance of spam farming here,
+		// but ideally we should checking for history too.
+		// For MVP/Safety, we assume Accept is a valid +XP event (strictly new).
+		// But let's check duplication just in case.
+		var existing models.UserLink
+		if err := tx.Unscoped().Where("linker_id = ? AND linked_id = ?", req.SenderID, userID).First(&existing).Error; err == nil {
+			// Exists
+			if existing.DeletedAt.Valid {
+				// Restore
+				tx.Unscoped().Model(&existing).Update("deleted_at", nil)
+				// Do NOT create new
+			}
+		} else {
+			if err := tx.Create(&newLink).Error; err != nil {
+				return err
+			}
 		}
 
 		// Update counters
+		// We'll just update counts, not XP here to keep logic simple/safe or give XP?
+		// User specifically complained about the public Link/Unlink spam loop.
+		// Let's give XP for Accepted Requests (it's hard to spam these as they require approval).
+		// But to be consistent: "One time per user".
+		// We should enforce it here too?
+		// It's low risk. I'll stick to modifying LinkUser first as that is the spam vector.
+
 		if err := tx.Model(&models.User{}).Where("id = ?", userID).UpdateColumn("linkersCount", gorm.Expr("COALESCE(\"linkersCount\", 0) + ?", 1)).Error; err != nil {
 			return err
 		}
 		if err := tx.Model(&models.User{}).Where("id = ?", req.SenderID).UpdateColumn("linkedCount", gorm.Expr("COALESCE(\"linkedCount\", 0) + ?", 1)).Error; err != nil {
 			return err
 		}
+
+		// Note: AcceptLink doesn't seem to update XP in the original code?
+		// Original code: Lines 210-213 only update counts.
+		// So Link Request flow DOES NOT award XP?
+		// Line 169 says "(+50 Influence)". That's for Direct Link.
+		// If AcceptLink doesn't give XP, then no problem.
 
 		// Notify Sender
 		notification := models.Notification{
@@ -318,9 +356,9 @@ func UnlinkUser(c *gin.Context) {
 		}
 
 		for _, u := range users {
-			updateData := map[string]interface{}{
-				"xp": gorm.Expr("GREATEST(xp - 50, 0)"),
-			}
+			// REMOVED XP DEDUCTION here to support "Permanent One-Time" Influence
+			updateData := map[string]interface{}{} // "xp": gorm.Expr("GREATEST(xp - 50, 0)")
+
 			if u.isTarget {
 				updateData["linkersCount"] = gorm.Expr("GREATEST(\"linkersCount\" - 1, 0)")
 			} else {
@@ -515,7 +553,8 @@ func ToggleLikeSnippet(c *gin.Context) {
 	})
 
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to toggle like"})
+		fmt.Printf("[Social] ToggleLikeSnippet FAILED for snippet %s, user %s: %v\n", snippetID, userID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to toggle like", "details": err.Error()})
 		return
 	}
 
@@ -577,7 +616,8 @@ func ToggleDislikeSnippet(c *gin.Context) {
 	})
 
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to toggle dislike"})
+		fmt.Printf("[Social] ToggleDislikeSnippet FAILED for snippet %s, user %s: %v\n", snippetID, userID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to toggle dislike", "details": err.Error()})
 		return
 	}
 

@@ -13,6 +13,7 @@ import (
 	"github.com/pushp314/devconnect-backend/internal/database"
 	"github.com/pushp314/devconnect-backend/internal/handlers"
 	"github.com/pushp314/devconnect-backend/internal/middleware"
+	"github.com/pushp314/devconnect-backend/internal/migrations"
 	"github.com/pushp314/devconnect-backend/internal/models"
 	"github.com/pushp314/devconnect-backend/internal/routes"
 	"github.com/pushp314/devconnect-backend/pkg/logger"
@@ -90,6 +91,9 @@ func main() {
 		&models.LinkRequest{},
 		&models.UserBlock{},
 		&models.Report{},
+		// Phase 7: Chat Reactions & Mentions
+		&models.MessageReaction{},
+		&models.Mention{},
 	}
 
 	for _, m := range tableModels {
@@ -103,6 +107,13 @@ func main() {
 	database.DB.Config.DisableForeignKeyConstraintWhenMigrating = false
 	if err := database.DB.AutoMigrate(tableModels...); err != nil {
 		logger.Fatal().Err(err).Msg("Failed to add database constraints")
+	}
+
+	// Stage 3: Run raw SQL migrations (FK constraints that GORM can't handle)
+	logger.Info().Msg("🔄 Running Database Migrations (Stage 3: Raw SQL)...")
+	migrator := migrations.NewMigrator(database.DB)
+	if err := migrator.Run(); err != nil {
+		logger.Fatal().Err(err).Msg("Failed to run raw SQL migrations")
 	}
 
 	// Initialize Default Settings if missing

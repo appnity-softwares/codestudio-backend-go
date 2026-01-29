@@ -515,6 +515,9 @@ func AdminGetDashboard(c *gin.Context) {
 		metrics.SubmissionSuccessRate = float64(acceptedSubs) / float64(totalSubs)
 	}
 
+	// Online Users (Real-time tracking)
+	metrics.OnlineUsersCount = int64(len(GetOnlineUsers()))
+
 	c.JSON(http.StatusOK, gin.H{"metrics": metrics})
 }
 

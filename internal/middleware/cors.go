@@ -10,13 +10,17 @@ import (
 
 func CORSMiddleware() gin.HandlerFunc {
 	// Basic CORS setup allowing frontend
-	config := cors.Config{
-		AllowOrigins:     []string{config.AppConfig.FrontendURL, "http://localhost:5173"}, // Explicit + Config
+	corsConfig := cors.Config{
+		AllowOrigins: []string{
+			config.AppConfig.FrontendURL,
+			"http://localhost:5173",
+			"https://codestudio.appnity.cloud", // Production Frontend
+		},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}
-	return cors.New(config)
+	return cors.New(corsConfig)
 }

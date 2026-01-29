@@ -130,4 +130,5 @@ type DashboardMetrics struct {
 	// v1.3 Enhanced Metrics
 	NewSnippetsToday      int64   `json:"newSnippetsToday"`
 	SubmissionSuccessRate float64 `json:"submissionSuccessRate"`
+	OnlineUsersCount      int64   `json:"onlineUsersCount"`
 }

@@ -83,6 +83,9 @@ var (
 
 	// Contest submission: 20 per minute
 	SubmitLimiter = NewIPRateLimiter(rate.Limit(20.0/60.0), 5)
+
+	// Chat messages: 30 per minute (prevents spam, allows normal conversation)
+	ChatLimiter = NewIPRateLimiter(rate.Limit(30.0/60.0), 10)
 )
 
 // RateLimitMiddleware creates a rate limiting middleware with a custom limiter
@@ -127,4 +130,9 @@ func GeneralRateLimit() gin.HandlerFunc {
 // SubmitRateLimit is for contest submission endpoints
 func SubmitRateLimit() gin.HandlerFunc {
 	return RateLimitMiddleware(SubmitLimiter)
+}
+
+// ChatRateLimit is for chat message endpoints
+func ChatRateLimit() gin.HandlerFunc {
+	return RateLimitMiddleware(ChatLimiter)
 }
