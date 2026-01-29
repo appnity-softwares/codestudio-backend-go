@@ -33,13 +33,15 @@ type Snippet struct {
 	Difficulty string `gorm:"default:'MEDIUM';index" json:"difficulty"` // EASY, MEDIUM, HARD
 
 	// MVP v1.1: Stats & Signals
-	ViewsCount int  `gorm:"default:0" json:"viewsCount"`
-	CopyCount  int  `gorm:"default:0" json:"copyCount"`
-	LikesCount int  `gorm:"default:0" json:"likesCount"` // v1.3 Engagement
-	IsFeatured bool `gorm:"default:false;index" json:"isFeatured"`
+	ViewsCount    int  `gorm:"default:0" json:"viewsCount"`
+	CopyCount     int  `gorm:"default:0" json:"copyCount"`
+	LikesCount    int  `gorm:"default:0" json:"likesCount"`    // v1.3 Engagement
+	DislikesCount int  `gorm:"default:0" json:"dislikesCount"` // v1.4
+	IsFeatured    bool `gorm:"default:false;index" json:"isFeatured"`
 
 	// Virtual Fields (Auth Context)
-	IsLiked bool `gorm:"-" json:"isLiked"`
+	IsLiked    bool `gorm:"-" json:"isLiked"`
+	IsDisliked bool `gorm:"-" json:"isDisliked"`
 
 	// Execution Validation
 	Status              string `gorm:"default:'DRAFT'" json:"status"` // DRAFT, PUBLISHED

@@ -767,6 +767,42 @@ func GetUserSnippets(c *gin.Context) {
 		return
 	}
 
+	// 3. Populate Interaction Status (IsLiked/IsDisliked)
+	if viewerID != "" {
+		var snippetIDs []string
+		for _, s := range snippets {
+			snippetIDs = append(snippetIDs, s.ID)
+		}
+
+		if len(snippetIDs) > 0 {
+			var likes []models.SnippetLike
+			database.DB.Select("snippet_id").Where("user_id = ? AND snippet_id IN ?", viewerID, snippetIDs).Find(&likes)
+
+			likedMap := make(map[string]bool)
+			for _, l := range likes {
+				likedMap[l.SnippetID] = true
+			}
+
+			var dislikes []models.SnippetDislike
+			database.DB.Select("snippet_id").Where("user_id = ? AND snippet_id IN ?", viewerID, snippetIDs).Find(&dislikes)
+
+			dislikedMap := make(map[string]bool)
+			for _, d := range dislikes {
+				dislikedMap[d.SnippetID] = true
+			}
+
+			// Map back to result
+			for i := range snippets {
+				if likedMap[snippets[i].ID] {
+					snippets[i].IsLiked = true
+				}
+				if dislikedMap[snippets[i].ID] {
+					snippets[i].IsDisliked = true
+				}
+			}
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{"snippets": snippets})
 }
 

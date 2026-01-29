@@ -15,7 +15,7 @@ func GenerateSitemap(c *gin.Context) {
 	c.Header("Content-Type", "application/xml")
 
 	var snippets []models.Snippet
-	database.DB.Select("id, updated_at").Where("visibility = ?", "PUBLIC").Find(&snippets)
+	database.DB.Select("id, updated_at").Where("visibility = ?", "public").Find(&snippets)
 
 	var users []models.User
 	database.DB.Select("username, updated_at").Where("visibility = ?", "PUBLIC").Find(&users)

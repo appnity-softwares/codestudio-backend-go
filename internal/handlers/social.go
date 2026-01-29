@@ -86,23 +86,37 @@ func LinkUser(c *gin.Context) {
 	// 4. Public Path: Direct Link
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
 		var existingLink models.UserLink
-		// GORM will use model TableName() "UserLink"
-		if err := tx.Model(&models.UserLink{}).Where("linker_id = ? AND linked_id = ?", linkerID, actualTargetID).First(&existingLink).Error; err == nil {
-			return nil // Already linked
-		}
+		// Check for existing link (including soft-deleted)
+		err := tx.Unscoped().Where("linker_id = ? AND linked_id = ?", linkerID, actualTargetID).First(&existingLink).Error
 
-		newLink := models.UserLink{
-			LinkerID: linkerID.(string),
-			LinkedID: actualTargetID,
-		}
-		if err := tx.Create(&newLink).Error; err != nil {
-			return fmt.Errorf("create link: %w", err)
+		if err == nil {
+			// Record found
+			if existingLink.DeletedAt.Valid {
+				// Soft-deleted -> Restore it
+				if err := tx.Unscoped().Model(&existingLink).Update("deleted_at", nil).Error; err != nil {
+					return fmt.Errorf("restore link: %w", err)
+				}
+				// Proceed to update counters below
+			} else {
+				// Already active -> Do nothing
+				return nil
+			}
+		} else if err == gorm.ErrRecordNotFound {
+			// No record -> Create new
+			newLink := models.UserLink{
+				LinkerID: linkerID.(string),
+				LinkedID: actualTargetID,
+			}
+			if err := tx.Create(&newLink).Error; err != nil {
+				return fmt.Errorf("create link: %w", err)
+			}
+		} else {
+			return err
 		}
 
 		// Update counters with XP - GORM uses model TableName() "User"
 		// Linker gets +50 XP (Action Reward)
 		// Linked gets +50 XP (Influence Reward)
-		// We use explicitly defined column names from User struct tags (linkersCount, linkedCount)
 		if err := tx.Model(&models.User{}).Where("id = ?", actualTargetID).Updates(map[string]interface{}{
 			"linkersCount": gorm.Expr("\"linkersCount\" + ?", 1),
 			"xp":           gorm.Expr("xp + ?", 50),
@@ -250,19 +264,40 @@ func UnlinkUser(c *gin.Context) {
 	actualTargetID := targetUser.ID
 
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		// 1. Check for Pending Request (Cancel it)
+		var pendingReq models.LinkRequest
+		if err := tx.Where("sender_id = ? AND receiver_id = ? AND status = ?", linkerID, actualTargetID, models.LinkRequestPending).First(&pendingReq).Error; err == nil {
+			// Found pending request -> Delete it
+			if err := tx.Delete(&pendingReq).Error; err != nil {
+				return err
+			}
+			return nil // Done
+		}
+
+		// 2. Check for Active Link (Unfollow)
 		var link models.UserLink
 		if err := tx.Model(&models.UserLink{}).Where("linker_id = ? AND linked_id = ?", linkerID, actualTargetID).First(&link).Error; err != nil {
-			return nil // Idempotent
+			return nil // Idempotent (Nothing to unlink)
 		}
 
-		if err := tx.Delete(&link).Error; err != nil {
+		// Use Hard Delete to keep table clean and avoid unique index issues on re-linking
+		if err := tx.Unscoped().Delete(&link).Error; err != nil {
 			return err
 		}
 
-		if err := tx.Model(&models.User{}).Where("id = ?", actualTargetID).UpdateColumn("linkersCount", gorm.Expr("GREATEST(\"linkersCount\" - 1, 0)")).Error; err != nil {
+		// Update counters AND Deduct XP (Prevent Farming)
+		// Linker loses the 50 XP reward
+		// Linked loses the 50 XP influence
+		if err := tx.Model(&models.User{}).Where("id = ?", actualTargetID).Updates(map[string]interface{}{
+			"linkersCount": gorm.Expr("GREATEST(\"linkersCount\" - 1, 0)"),
+			"xp":           gorm.Expr("GREATEST(xp - 50, 0)"),
+		}).Error; err != nil {
 			return err
 		}
-		if err := tx.Model(&models.User{}).Where("id = ?", linkerID).UpdateColumn("linkedCount", gorm.Expr("GREATEST(\"linkedCount\" - 1, 0)")).Error; err != nil {
+		if err := tx.Model(&models.User{}).Where("id = ?", linkerID).Updates(map[string]interface{}{
+			"linkedCount": gorm.Expr("GREATEST(\"linkedCount\" - 1, 0)"),
+			"xp":          gorm.Expr("GREATEST(xp - 50, 0)"),
+		}).Error; err != nil {
 			return err
 		}
 
@@ -395,13 +430,25 @@ func ToggleLikeSnippet(c *gin.Context) {
 				return err
 			}
 			// Decrement counter (but not below 0)
-			// Using gorm.Expr is safer
 			if err := tx.Model(&models.Snippet{}).Where("id = ?", snippetID).UpdateColumn("likes_count", gorm.Expr("GREATEST(likes_count - 1, 0)")).Error; err != nil {
 				return err
 			}
 			liked = false
 		} else {
 			// Like doesn't exist -> Like
+
+			// 1. Remove Dislike if exists (Mutually Exclusive)
+			var dislike models.SnippetDislike
+			if err := tx.Where("user_id = ? AND snippet_id = ?", userID, snippetID).First(&dislike).Error; err == nil {
+				if err := tx.Delete(&dislike).Error; err != nil {
+					return err
+				}
+				if err := tx.Model(&models.Snippet{}).Where("id = ?", snippetID).UpdateColumn("dislikes_count", gorm.Expr("GREATEST(dislikes_count - 1, 0)")).Error; err != nil {
+					return err
+				}
+			}
+
+			// 2. Create Like
 			newLike := models.SnippetLike{
 				UserID:    userID.(string),
 				SnippetID: snippetID,
@@ -442,6 +489,68 @@ func ToggleLikeSnippet(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"liked": liked})
 }
 
+// ToggleDislikeSnippet handles POST /snippets/:id/dislike
+func ToggleDislikeSnippet(c *gin.Context) {
+	userID, exists := c.Get("userId")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	snippetID := c.Param("id")
+
+	var disliked bool
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		var dislike models.SnippetDislike
+		result := tx.Where("user_id = ? AND snippet_id = ?", userID, snippetID).First(&dislike)
+
+		if result.Error == nil {
+			// Dislike exists -> Remove Dislike
+			if err := tx.Delete(&dislike).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&models.Snippet{}).Where("id = ?", snippetID).UpdateColumn("dislikes_count", gorm.Expr("GREATEST(dislikes_count - 1, 0)")).Error; err != nil {
+				return err
+			}
+			disliked = false
+		} else {
+			// Dislike doesn't exist -> Dislike
+
+			// 1. Remove Like if exists (Mutually Exclusive)
+			var like models.SnippetLike
+			if err := tx.Where("user_id = ? AND snippet_id = ?", userID, snippetID).First(&like).Error; err == nil {
+				if err := tx.Delete(&like).Error; err != nil {
+					return err
+				}
+				if err := tx.Model(&models.Snippet{}).Where("id = ?", snippetID).UpdateColumn("likes_count", gorm.Expr("GREATEST(likes_count - 1, 0)")).Error; err != nil {
+					return err
+				}
+			}
+
+			// 2. Create Dislike
+			newDislike := models.SnippetDislike{
+				UserID:    userID.(string),
+				SnippetID: snippetID,
+			}
+			if err := tx.Create(&newDislike).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&models.Snippet{}).Where("id = ?", snippetID).UpdateColumn("dislikes_count", gorm.Expr("dislikes_count + ?", 1)).Error; err != nil {
+				return err
+			}
+
+			disliked = true
+		}
+		return nil
+	})
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to toggle dislike"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"disliked": disliked})
+}
+
 // CheckSnippetLike handles GET /snippets/:id/like
 func CheckSnippetLike(c *gin.Context) {
 	userID, exists := c.Get("userId")
@@ -451,10 +560,13 @@ func CheckSnippetLike(c *gin.Context) {
 	}
 	snippetID := c.Param("id")
 
-	var count int64
-	database.DB.Model(&models.SnippetLike{}).Where("user_id = ? AND snippet_id = ?", userID, snippetID).Count(&count)
+	var likeCount int64
+	database.DB.Model(&models.SnippetLike{}).Where("user_id = ? AND snippet_id = ?", userID, snippetID).Count(&likeCount)
 
-	c.JSON(http.StatusOK, gin.H{"liked": count > 0})
+	var dislikeCount int64
+	database.DB.Model(&models.SnippetDislike{}).Where("user_id = ? AND snippet_id = ?", userID, snippetID).Count(&dislikeCount)
+
+	c.JSON(http.StatusOK, gin.H{"liked": likeCount > 0, "disliked": dislikeCount > 0})
 }
 
 // --- Comments ---

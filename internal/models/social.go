@@ -32,6 +32,18 @@ type SnippetLike struct {
 	Snippet   Snippet `gorm:"foreignKey:SnippetID" json:"snippet"`
 }
 
+// SnippetDislike represents a dislike on a snippet
+type SnippetDislike struct {
+	ID        string    `gorm:"primaryKey;type:text;default:uuid_generate_v4()" json:"id"`
+	CreatedAt time.Time `json:"createdAt"`
+
+	UserID string `gorm:"uniqueIndex:idx_user_snippet_dislike" json:"userId"`
+	User   User   `gorm:"foreignKey:UserID" json:"user"`
+
+	SnippetID string  `gorm:"uniqueIndex:idx_user_snippet_dislike" json:"snippetId"`
+	Snippet   Snippet `gorm:"foreignKey:SnippetID" json:"snippet"`
+}
+
 // Comment represents a comment on a snippet
 type Comment struct {
 	ID        string         `gorm:"primaryKey;type:text;default:uuid_generate_v4()" json:"id"`
@@ -66,6 +78,17 @@ func (SnippetLike) TableName() string {
 func (sl *SnippetLike) BeforeCreate(tx *gorm.DB) (err error) {
 	if sl.ID == "" {
 		sl.ID = uuid.New().String()
+	}
+	return
+}
+
+func (SnippetDislike) TableName() string {
+	return "SnippetDislike"
+}
+
+func (sd *SnippetDislike) BeforeCreate(tx *gorm.DB) (err error) {
+	if sd.ID == "" {
+		sd.ID = uuid.New().String()
 	}
 	return
 }

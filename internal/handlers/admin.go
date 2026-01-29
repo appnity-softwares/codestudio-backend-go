@@ -319,20 +319,57 @@ func AdminDeleteSnippet(c *gin.Context) {
 	snippetID := c.Param("id")
 	adminID := getAdminID(c)
 
-	var snippet models.Snippet
-	if err := database.DB.First(&snippet, "id = ?", snippetID).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Snippet not found"})
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		var snippet models.Snippet
+		// Find snippet (even if soft deleted or if author is missing, we just need the ID to clean up)
+		// We use Unscoped to find it even if it was partially deleted
+		if err := tx.Unscoped().First(&snippet, "id = ?", snippetID).Error; err != nil {
+			return err
+		}
+
+		// Cleanup Forks (Unlink them to avoid FK violation)
+		// Note: 'forkedFromId' column exists in DB constraint but might be missing from model strut.
+		// We use raw SQL to be safe.
+		if err := tx.Exec("UPDATE \"Snippet\" SET \"forkedFromId\" = NULL WHERE \"forkedFromId\" = ?", snippetID).Error; err != nil {
+			// Identify if error is just "column check" or real DB error?
+			// If column doesn't exist, we might proceed, but constraint violation implies it does.
+			return err
+		}
+		// Cleanup Dependents (Hard Delete) - Check errors for each to avoid silent transaction failures
+		if err := tx.Unscoped().Where("snippet_id = ?", snippetID).Delete(&models.SnippetLike{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Unscoped().Where("snippet_id = ?", snippetID).Delete(&models.SnippetDislike{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Unscoped().Where("snippet_id = ?", snippetID).Delete(&models.Comment{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Unscoped().Where("entity_type = ? AND entity_id = ?", models.EntityTypeSnippet, snippetID).Delete(&models.EntityView{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Unscoped().Where("entity_type = ? AND entity_id = ?", models.EntityTypeSnippet, snippetID).Delete(&models.EntityCopy{}).Error; err != nil {
+			return err
+		}
+
+		// Finally, Hard Delete the Snippet
+		if err := tx.Unscoped().Delete(&snippet).Error; err != nil {
+			return err
+		}
+
+		return logAdminAction(tx, adminID, models.ActionDeleteSnippet, snippetID, "snippet", "Hard Deleted by staff (Cleanup)")
+	})
+
+	if err != nil {
+		if err == gorm.ErrRecordNotFound { // Handle not found specifically
+			c.JSON(http.StatusNotFound, gin.H{"error": "Snippet not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete snippet: " + err.Error()})
+		}
 		return
 	}
 
-	if err := database.DB.Delete(&snippet).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete snippet"})
-		return
-	}
-
-	logAdminAction(database.DB, adminID, models.ActionDeleteSnippet, snippetID, "snippet", "Deleted by staff")
-
-	c.JSON(http.StatusOK, gin.H{"message": "Snippet deleted successfully"})
+	c.JSON(http.StatusOK, gin.H{"message": "Snippet permanently deleted"})
 }
 
 // AdminAdjustTrustScore manually sets a user's trust score with audit logging
@@ -825,6 +862,7 @@ func AdminDeleteUser(c *gin.Context) {
 		// Note: Snippets might have their own dependencies (Likes, Comments).
 		// Ideally DB has ON DELETE CASCADE, but to be safe we delete what we can.
 		tx.Unscoped().Where("user_id = ?", targetUserID).Delete(&models.SnippetLike{})
+		tx.Unscoped().Where("user_id = ?", targetUserID).Delete(&models.SnippetDislike{})
 		tx.Unscoped().Where("user_id = ?", targetUserID).Delete(&models.Comment{})
 		// Delete snippets authored by user
 		tx.Unscoped().Where("\"authorId\" = ?", targetUserID).Delete(&models.Snippet{})
@@ -836,6 +874,9 @@ func AdminDeleteUser(c *gin.Context) {
 		tx.Unscoped().Where("user_id = ?", targetUserID).Delete(&models.TrustScoreHistory{})
 		tx.Unscoped().Where("user_id = ? OR actor_id = ?", targetUserID, targetUserID).Delete(&models.Notification{})
 		tx.Unscoped().Where("reporter_id = ? OR target_id = ?", targetUserID, targetUserID).Delete(&models.Report{})
+		// cleanup copies and views
+		tx.Unscoped().Where("user_id = ?", targetUserID).Delete(&models.EntityCopy{})
+		tx.Unscoped().Where("user_id = ?", targetUserID).Delete(&models.EntityView{})
 
 		// 4. Delete User (Hard Delete)
 		if err := tx.Unscoped().Delete(&user).Error; err != nil {
@@ -1010,7 +1051,10 @@ func PublicGetSystemStatus(c *gin.Context) {
 }
 
 // PublicGetLandingStats returns real platform stats for the landing page
+// PublicGetLandingStats returns real platform stats for the landing page
 func PublicGetLandingStats(c *gin.Context) {
+	cacheKey := "landing_stats"
+
 	var stats struct {
 		TotalUsers       int64          `json:"totalUsers"`
 		TotalSubmissions int64          `json:"totalSubmissions"`
@@ -1018,6 +1062,12 @@ func PublicGetLandingStats(c *gin.Context) {
 		TotalContests    int64          `json:"totalContests"`
 		UpcomingEvents   []models.Event `json:"upcomingEvents"`
 		TopContestants   []models.User  `json:"topContestants"`
+	}
+
+	// Try Cache First
+	if err := database.CacheGet(cacheKey, &stats); err == nil {
+		c.JSON(http.StatusOK, stats)
+		return
 	}
 
 	// 1. Basic Counts
@@ -1037,6 +1087,9 @@ func PublicGetLandingStats(c *gin.Context) {
 		Order("trust_score desc, snippet_count desc").
 		Limit(3).
 		Find(&stats.TopContestants)
+
+	// Set Cache (5 minutes)
+	database.CacheSet(cacheKey, stats, 5*time.Minute)
 
 	c.JSON(http.StatusOK, stats)
 }

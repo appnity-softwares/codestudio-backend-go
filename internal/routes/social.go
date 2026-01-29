@@ -42,6 +42,7 @@ func RegisterSocialRoutes(r gin.IRouter) {
 		protected.Use(middleware.AuthMiddleware())
 		{
 			protected.POST("/:id/like", handlers.ToggleLikeSnippet)
+			protected.POST("/:id/dislike", handlers.ToggleDislikeSnippet)
 			protected.GET("/:id/like", handlers.CheckSnippetLike) // Auth check for 'my' like status
 			protected.POST("/:id/comments", handlers.AddComment)
 		}

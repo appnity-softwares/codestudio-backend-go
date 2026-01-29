@@ -83,6 +83,7 @@ func main() {
 		&models.PlaylistSnippet{},
 		&models.UserLink{},
 		&models.SnippetLike{},
+		&models.SnippetDislike{},
 		&models.Comment{},
 		&models.Badge{},
 		&models.UserBadge{},
@@ -103,6 +104,26 @@ func main() {
 	if err := database.DB.AutoMigrate(tableModels...); err != nil {
 		logger.Fatal().Err(err).Msg("Failed to add database constraints")
 	}
+
+	// Initialize Default Settings if missing
+	defaultSettings := map[string]string{
+		models.SettingFeatureSocialChat:   "true",
+		models.SettingFeatureSocialFollow: "true",
+		models.SettingFeatureSocialFeed:   "true",
+	}
+	for k, v := range defaultSettings {
+		var count int64
+		database.DB.Model(&models.SystemSettings{}).Where("key = ?", k).Count(&count)
+		if count == 0 {
+			database.DB.Create(&models.SystemSettings{
+				Key:       k,
+				Value:     v,
+				UpdatedAt: time.Now(),
+				UpdatedBy: "system",
+			})
+		}
+	}
+
 	logger.Info().Msg("✅ Database Migrations Complete")
 
 	// 3. Init OAuth
@@ -114,6 +135,7 @@ func main() {
 	// Middlewares
 	r.Use(middleware.LoggingMiddleware())
 	r.Use(middleware.ErrorHandlerMiddleware())
+	r.Use(middleware.SecurityHeaders()) // Added Security Headers
 	r.Use(gin.Recovery())
 	r.Use(middleware.CORSMiddleware())
 

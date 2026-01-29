@@ -122,9 +122,20 @@ func ListSnippets(c *gin.Context) {
 				likedMap[l.SnippetID] = true
 			}
 
+			var dislikes []models.SnippetDislike
+			database.DB.Select("snippet_id").Where("user_id = ? AND snippet_id IN ?", userID, snippetIDs).Find(&dislikes)
+
+			dislikedMap := make(map[string]bool)
+			for _, d := range dislikes {
+				dislikedMap[d.SnippetID] = true
+			}
+
 			for i := range snippets {
 				if likedMap[snippets[i].ID] {
 					snippets[i].IsLiked = true
+				}
+				if dislikedMap[snippets[i].ID] {
+					snippets[i].IsDisliked = true
 				}
 			}
 		}
@@ -228,6 +239,10 @@ func GetSnippet(c *gin.Context) {
 		var count int64
 		database.DB.Model(&models.SnippetLike{}).Where("user_id = ? AND snippet_id = ?", userID, snippet.ID).Count(&count)
 		snippet.IsLiked = count > 0
+
+		var dislikeCount int64
+		database.DB.Model(&models.SnippetDislike{}).Where("user_id = ? AND snippet_id = ?", userID, snippet.ID).Count(&dislikeCount)
+		snippet.IsDisliked = dislikeCount > 0
 	}
 
 	c.JSON(http.StatusOK, gin.H{"snippet": snippet})
@@ -313,7 +328,17 @@ func DeleteSnippet(c *gin.Context) {
 		return
 	}
 
-	if snippet.AuthorID != userID.(string) {
+	// Logic to check ownership or Admin override
+	// We need to fetch user role. The context "userId" is just ID string.
+	// We should fetch User or check claims if available.
+	// For now, let's fetch the user to check role.
+	var currentUser models.User
+	if err := database.DB.Select("id", "role").First(&currentUser, "id = ?", userID).Error; err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		return
+	}
+
+	if snippet.AuthorID != userID.(string) && currentUser.Role != models.RoleAdmin && currentUser.Role != "STAFF" {
 		c.JSON(http.StatusForbidden, gin.H{"error": "You can only delete your own snippets"})
 		return
 	}
@@ -564,9 +589,20 @@ func GetFeed(c *gin.Context) {
 				likedMap[l.SnippetID] = true
 			}
 
+			var dislikes []models.SnippetDislike
+			database.DB.Select("snippet_id").Where("user_id = ? AND snippet_id IN ?", userID, snippetIDs).Find(&dislikes)
+
+			dislikedMap := make(map[string]bool)
+			for _, d := range dislikes {
+				dislikedMap[d.SnippetID] = true
+			}
+
 			for i := range snippets {
 				if likedMap[snippets[i].ID] {
 					snippets[i].IsLiked = true
+				}
+				if dislikedMap[snippets[i].ID] {
+					snippets[i].IsDisliked = true
 				}
 			}
 		}
