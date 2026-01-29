@@ -336,6 +336,9 @@ func AdminDeleteSnippet(c *gin.Context) {
 			return err
 		}
 		// Cleanup Dependents (Hard Delete) - Check errors for each to avoid silent transaction failures
+		if err := tx.Unscoped().Where("snippet_id = ?", snippetID).Delete(&models.Notification{}).Error; err != nil {
+			return err
+		}
 		if err := tx.Unscoped().Where("snippet_id = ?", snippetID).Delete(&models.SnippetLike{}).Error; err != nil {
 			return err
 		}
@@ -349,6 +352,9 @@ func AdminDeleteSnippet(c *gin.Context) {
 			return err
 		}
 		if err := tx.Unscoped().Where("entity_type = ? AND entity_id = ?", models.EntityTypeSnippet, snippetID).Delete(&models.EntityCopy{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Unscoped().Where("snippet_id = ?", snippetID).Delete(&models.PlaylistSnippet{}).Error; err != nil {
 			return err
 		}
 

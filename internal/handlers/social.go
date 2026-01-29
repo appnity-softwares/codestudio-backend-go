@@ -13,6 +13,7 @@ import (
 
 // LinkUser handles POST /users/:id/link (Follow)
 func LinkUser(c *gin.Context) {
+	fmt.Printf("[Social] Processing Link request for target: %s\n", c.Param("username"))
 	// 1. Get Auth User
 	linkerID, exists := c.Get("userId")
 	if !exists {
@@ -35,6 +36,11 @@ func LinkUser(c *gin.Context) {
 	}
 	// Use the actual ID from the found user
 	actualTargetID := targetUser.ID
+
+	if linkerID.(string) == actualTargetID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot link yourself"})
+		return
+	}
 
 	// Blocking Check
 	var blockCount int64
@@ -89,7 +95,8 @@ func LinkUser(c *gin.Context) {
 		// Check for existing link (including soft-deleted)
 		err := tx.Unscoped().Where("linker_id = ? AND linked_id = ?", linkerID, actualTargetID).First(&existingLink).Error
 
-		if err == nil {
+		switch err {
+		case nil:
 			// Record found
 			if existingLink.DeletedAt.Valid {
 				// Soft-deleted -> Restore it
@@ -101,7 +108,7 @@ func LinkUser(c *gin.Context) {
 				// Already active -> Do nothing
 				return nil
 			}
-		} else if err == gorm.ErrRecordNotFound {
+		case gorm.ErrRecordNotFound:
 			// No record -> Create new
 			newLink := models.UserLink{
 				LinkerID: linkerID.(string),
@@ -110,51 +117,64 @@ func LinkUser(c *gin.Context) {
 			if err := tx.Create(&newLink).Error; err != nil {
 				return fmt.Errorf("create link: %w", err)
 			}
-		} else {
+		default:
 			return err
 		}
 
-		// Update counters with XP - GORM uses model TableName() "User"
-		// Linker gets +50 XP (Action Reward)
-		// Linked gets +50 XP (Influence Reward)
-		if err := tx.Model(&models.User{}).Where("id = ?", actualTargetID).Updates(map[string]interface{}{
-			"linkersCount": gorm.Expr("\"linkersCount\" + ?", 1),
-			"xp":           gorm.Expr("xp + ?", 50),
-		}).Error; err != nil {
-			return fmt.Errorf("update target user: %w", err)
-		}
-		if err := tx.Model(&models.User{}).Where("id = ?", linkerID).Updates(map[string]interface{}{
-			"linkedCount": gorm.Expr("\"linkedCount\" + ?", 1),
-			"xp":          gorm.Expr("xp + ?", 50),
-		}).Error; err != nil {
-			return fmt.Errorf("update linker user: %w", err)
+		// Merge all updates into a single call per user to minimize lock time
+		// and use deterministic order to prevent deadlocks.
+		users := []struct {
+			id       string
+			isTarget bool
+		}{
+			{id: actualTargetID, isTarget: true},
+			{id: linkerID.(string), isTarget: false},
 		}
 
-		// Notify
-		notification := models.Notification{
-			UserID:  actualTargetID,
-			ActorID: linkerID.(string),
-			Type:    models.NotificationTypeLinkAccept,
-			Message: "linked with you (+50 Influence)",
+		// Deterministic sort
+		if users[0].id > users[1].id {
+			users[0], users[1] = users[1], users[0]
 		}
-		if err := CreateNotification(tx, notification); err != nil {
-			// Log but don't fail transaction for notifications
-			fmt.Printf("Notification failed: %v\n", err)
+
+		for _, u := range users {
+			updateData := map[string]interface{}{
+				"xp": gorm.Expr("xp + 50"),
+			}
+			if u.isTarget {
+				updateData["linkersCount"] = gorm.Expr("\"linkersCount\" + 1")
+			} else {
+				updateData["linkedCount"] = gorm.Expr("\"linkedCount\" + 1")
+			}
+
+			if err := tx.Model(&models.User{}).Where("id = ?", u.id).Updates(updateData).Error; err != nil {
+				return fmt.Errorf("update user %s: %w", u.id, err)
+			}
 		}
 
 		return nil
 	})
 
 	if err != nil {
-		fmt.Printf("Error linking user: %v\n", err)
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Failed to link user",
-			"details": err.Error(),
-		})
+		fmt.Printf("[Social] Link processing failed: %v\n", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to link user", "details": err.Error()})
 		return
 	}
 
+	// 5. Send Notification (Post-Transaction, Async)
+	go func(targetID, actorID string) {
+		notification := models.Notification{
+			UserID:  targetID,
+			ActorID: actorID,
+			Type:    models.NotificationTypeLinkAccept,
+			Message: "linked with you (+50 Influence)",
+		}
+		if err := CreateNotification(database.DB, notification); err != nil {
+			fmt.Printf("[Social] Notification async fail: %v\n", err)
+		}
+	}(actualTargetID, linkerID.(string))
+
 	c.JSON(http.StatusOK, gin.H{"message": "User linked successfully", "linked": true})
+	fmt.Printf("[Social] Link success: %s -> %s\n", linkerID, actualTargetID)
 }
 
 // AcceptLinkRequest POST /users/link-requests/:id/accept
@@ -187,10 +207,10 @@ func AcceptLinkRequest(c *gin.Context) {
 		}
 
 		// Update counters
-		if err := tx.Model(&models.User{}).Where("id = ?", userID).UpdateColumn("linkersCount", gorm.Expr("\"linkersCount\" + ?", 1)).Error; err != nil {
+		if err := tx.Model(&models.User{}).Where("id = ?", userID).UpdateColumn("linkersCount", gorm.Expr("COALESCE(\"linkersCount\", 0) + ?", 1)).Error; err != nil {
 			return err
 		}
-		if err := tx.Model(&models.User{}).Where("id = ?", req.SenderID).UpdateColumn("linkedCount", gorm.Expr("\"linkedCount\" + ?", 1)).Error; err != nil {
+		if err := tx.Model(&models.User{}).Where("id = ?", req.SenderID).UpdateColumn("linkedCount", gorm.Expr("COALESCE(\"linkedCount\", 0) + ?", 1)).Error; err != nil {
 			return err
 		}
 
@@ -285,31 +305,44 @@ func UnlinkUser(c *gin.Context) {
 			return err
 		}
 
-		// Update counters AND Deduct XP (Prevent Farming)
-		// Linker loses the 50 XP reward
-		// Linked loses the 50 XP influence
-		if err := tx.Model(&models.User{}).Where("id = ?", actualTargetID).Updates(map[string]interface{}{
-			"linkersCount": gorm.Expr("GREATEST(\"linkersCount\" - 1, 0)"),
-			"xp":           gorm.Expr("GREATEST(xp - 50, 0)"),
-		}).Error; err != nil {
-			return err
+		// Deterministic locking order
+		users := []struct {
+			id       string
+			isTarget bool
+		}{
+			{id: actualTargetID, isTarget: true},
+			{id: linkerID.(string), isTarget: false},
 		}
-		if err := tx.Model(&models.User{}).Where("id = ?", linkerID).Updates(map[string]interface{}{
-			"linkedCount": gorm.Expr("GREATEST(\"linkedCount\" - 1, 0)"),
-			"xp":          gorm.Expr("GREATEST(xp - 50, 0)"),
-		}).Error; err != nil {
-			return err
+		if users[0].id > users[1].id {
+			users[0], users[1] = users[1], users[0]
+		}
+
+		for _, u := range users {
+			updateData := map[string]interface{}{
+				"xp": gorm.Expr("GREATEST(xp - 50, 0)"),
+			}
+			if u.isTarget {
+				updateData["linkersCount"] = gorm.Expr("GREATEST(\"linkersCount\" - 1, 0)")
+			} else {
+				updateData["linkedCount"] = gorm.Expr("GREATEST(\"linkedCount\" - 1, 0)")
+			}
+
+			if err := tx.Model(&models.User{}).Where("id = ?", u.id).Updates(updateData).Error; err != nil {
+				return err
+			}
 		}
 
 		return nil
 	})
 
 	if err != nil {
+		fmt.Printf("[Social] Unlink failed: %v\n", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to unlink user", "details": err.Error()})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "User unlinked successfully", "linked": false})
+	fmt.Printf("[Social] Unlink success: %s -> %s\n", linkerID, actualTargetID)
 }
 
 // GetLinkers handles GET /users/:id/linkers (Followers)

@@ -27,8 +27,7 @@ func GetMyRegistrations(c *gin.Context) {
 
 // ListRegistrations handles GET /registrations (Admin)
 func ListRegistrations(c *gin.Context) {
-	// TODO: Add Admin Middleware Check
-	// For now, assuming route is protected by simple auth, but needing role check ideally.
+	// Admin Role Check is handled by middleware routes.go
 
 	status := c.Query("status")
 	eventId := c.Query("eventId")

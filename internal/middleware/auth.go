@@ -26,16 +26,30 @@ func AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
+		// Validate token
 		tokenString := parts[1]
 		claims, err := utils.ValidateToken(tokenString)
 		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token"})
+			// Debug log
+			// fmt.Printf("Auth Debug: Token validation failed: %v\n", err)
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired token: " + err.Error()})
 			c.Abort()
 			return
 		}
 
 		// Set UserID in context for handlers to use
 		c.Set("userId", claims.UserID)
+
+		// Verify user exists and is active (not soft-deleted)
+		var user models.User
+		if err := database.DB.Select("id").First(&user, "id = ?", claims.UserID).Error; err != nil {
+			// Debug log
+			// fmt.Printf("Auth Debug: User lookup failed for ID %s: %v\n", claims.UserID, err)
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found or inactive"})
+			c.Abort()
+			return
+		}
+
 		c.Next()
 	}
 }

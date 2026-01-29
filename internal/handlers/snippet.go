@@ -112,22 +112,30 @@ func ListSnippets(c *gin.Context) {
 		for _, s := range snippets {
 			snippetIDs = append(snippetIDs, s.ID)
 		}
-
 		if len(snippetIDs) > 0 {
+			likedMap := make(map[string]bool)
 			var likes []models.SnippetLike
 			database.DB.Select("snippet_id").Where("user_id = ? AND snippet_id IN ?", userID, snippetIDs).Find(&likes)
-
-			likedMap := make(map[string]bool)
 			for _, l := range likes {
 				likedMap[l.SnippetID] = true
 			}
 
+			dislikedMap := make(map[string]bool)
 			var dislikes []models.SnippetDislike
 			database.DB.Select("snippet_id").Where("user_id = ? AND snippet_id IN ?", userID, snippetIDs).Find(&dislikes)
-
-			dislikedMap := make(map[string]bool)
 			for _, d := range dislikes {
 				dislikedMap[d.SnippetID] = true
+			}
+
+			var follows []models.UserLink
+			var authorIDs []string
+			for _, s := range snippets {
+				authorIDs = append(authorIDs, s.AuthorID)
+			}
+			database.DB.Where("linker_id = ? AND linked_id IN ?", userID, authorIDs).Find(&follows)
+			followMap := make(map[string]bool)
+			for _, f := range follows {
+				followMap[f.LinkedID] = true
 			}
 
 			for i := range snippets {
@@ -136,6 +144,9 @@ func ListSnippets(c *gin.Context) {
 				}
 				if dislikedMap[snippets[i].ID] {
 					snippets[i].IsDisliked = true
+				}
+				if followMap[snippets[i].AuthorID] {
+					snippets[i].Author.IsFollowing = true
 				}
 			}
 		}
@@ -243,6 +254,10 @@ func GetSnippet(c *gin.Context) {
 		var dislikeCount int64
 		database.DB.Model(&models.SnippetDislike{}).Where("user_id = ? AND snippet_id = ?", userID, snippet.ID).Count(&dislikeCount)
 		snippet.IsDisliked = dislikeCount > 0
+
+		var followCount int64
+		database.DB.Model(&models.UserLink{}).Where("linker_id = ? AND linked_id = ?", userID, snippet.AuthorID).Count(&followCount)
+		snippet.Author.IsFollowing = followCount > 0
 	}
 
 	c.JSON(http.StatusOK, gin.H{"snippet": snippet})
@@ -343,7 +358,39 @@ func DeleteSnippet(c *gin.Context) {
 		return
 	}
 
-	database.DB.Delete(&snippet)
+	// Use Transaction for Safe Deletion of cascading dependencies
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		// 1. Delete Notifications referencing this snippet
+		// Fixes: fk_notifications_snippet violation
+		if err := tx.Where("snippet_id = ?", snippet.ID).Delete(&models.Notification{}).Error; err != nil {
+			return err
+		}
+
+		// 2. Delete Comments
+		if err := tx.Where("snippet_id = ?", snippet.ID).Delete(&models.Comment{}).Error; err != nil {
+			return err
+		}
+
+		// 3. Delete Likes & Dislikes
+		if err := tx.Where("snippet_id = ?", snippet.ID).Delete(&models.SnippetLike{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("snippet_id = ?", snippet.ID).Delete(&models.SnippetDislike{}).Error; err != nil {
+			return err
+		}
+
+		// 4. Delete the Snippet
+		if err := tx.Delete(&snippet).Error; err != nil {
+			return err
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete snippet: " + err.Error()})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Snippet deleted"})
 }
@@ -560,6 +607,21 @@ func GetFeed(c *gin.Context) {
 		query = query.
 			Where("\"createdAt\" > NOW() - INTERVAL '30 days'").
 			Order("(copy_count * 2 + views_count - EXTRACT(EPOCH FROM (NOW() - \"createdAt\"))/3600 * 0.05) DESC")
+	case "personal":
+		if viewerID != "" {
+			var follows []models.UserLink
+			database.DB.Where("linker_id = ?", viewerID).Find(&follows)
+			var followingIDs []string
+			for _, f := range follows {
+				followingIDs = append(followingIDs, f.LinkedID)
+			}
+			if len(followingIDs) > 0 {
+				query = query.Where("\"authorId\" IN ?", followingIDs)
+			} else {
+				query = query.Where("1 = 0")
+			}
+		}
+		query = query.Order("\"createdAt\" DESC")
 	case "new":
 		query = query.Order("\"createdAt\" DESC")
 	case "editor":
@@ -574,7 +636,8 @@ func GetFeed(c *gin.Context) {
 	}
 
 	// Populate IsLiked for authenticated users
-	if userID, exists := c.Get("userId"); exists {
+	// Populate IsLiked for authenticated users
+	if viewerID != "" {
 		var snippetIDs []string
 		for _, s := range snippets {
 			snippetIDs = append(snippetIDs, s.ID)
@@ -582,7 +645,7 @@ func GetFeed(c *gin.Context) {
 
 		if len(snippetIDs) > 0 {
 			var likes []models.SnippetLike
-			database.DB.Select("snippet_id").Where("user_id = ? AND snippet_id IN ?", userID, snippetIDs).Find(&likes)
+			database.DB.Select("snippet_id").Where("user_id = ? AND snippet_id IN ?", viewerID, snippetIDs).Find(&likes)
 
 			likedMap := make(map[string]bool)
 			for _, l := range likes {
@@ -590,19 +653,34 @@ func GetFeed(c *gin.Context) {
 			}
 
 			var dislikes []models.SnippetDislike
-			database.DB.Select("snippet_id").Where("user_id = ? AND snippet_id IN ?", userID, snippetIDs).Find(&dislikes)
+			database.DB.Select("snippet_id").Where("user_id = ? AND snippet_id IN ?", viewerID, snippetIDs).Find(&dislikes)
 
 			dislikedMap := make(map[string]bool)
 			for _, d := range dislikes {
 				dislikedMap[d.SnippetID] = true
 			}
 
+			var follows []models.UserLink
+			var authorIDs []string
+			for _, s := range snippets {
+				authorIDs = append(authorIDs, s.AuthorID)
+			}
+			database.DB.Where("linker_id = ? AND linked_id IN ?", viewerID, authorIDs).Find(&follows)
+			followMap := make(map[string]bool)
+			for _, f := range follows {
+				followMap[f.LinkedID] = true
+			}
+
+			// Map back to result
 			for i := range snippets {
 				if likedMap[snippets[i].ID] {
 					snippets[i].IsLiked = true
 				}
 				if dislikedMap[snippets[i].ID] {
 					snippets[i].IsDisliked = true
+				}
+				if followMap[snippets[i].AuthorID] {
+					snippets[i].Author.IsFollowing = true
 				}
 			}
 		}

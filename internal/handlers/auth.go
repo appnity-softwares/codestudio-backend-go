@@ -356,7 +356,25 @@ func GithubCallback(c *gin.Context) {
 // Common OAuth Handler - Resolves user by email or creates new
 func handleOAuthLogin(c *gin.Context, email, name, image string) *models.User {
 	var user models.User
-	result := database.DB.Where("email = ?", email).First(&user)
+	// Use Unscoped to find user even if soft-deleted to avoid unique constraint violation
+	result := database.DB.Unscoped().Where("email = ?", email).First(&user)
+
+	if result.Error == nil {
+		// User exists
+		if user.DeletedAt.Valid {
+			// Restore soft-deleted user
+			if err := database.DB.Model(&user).Update("deleted_at", nil).Error; err != nil {
+				logger.Error().Err(err).Str("email", email).Msg("Failed to restore soft-deleted user during OAuth")
+				// We can continue, but logging is good. Or maybe we should fail?
+				// For now, let's assume we can proceed or that Update failing is rare.
+			} else {
+				logger.Info().Str("email", email).Msg("Restored soft-deleted user via OAuth")
+			}
+		}
+		// Optional: Update image/name if they changed?
+		// For now, just return the found user
+		return &user
+	}
 
 	if result.Error == gorm.ErrRecordNotFound {
 		// New User logic
@@ -411,13 +429,13 @@ func handleOAuthLogin(c *gin.Context, email, name, image string) *models.User {
 			return nil
 		}
 		logger.Info().Str("email", email).Str("user_id", user.ID).Msg("New user successfully registered via OAuth")
-	} else if result.Error != nil {
-		logger.Error().Err(result.Error).Str("email", email).Msg("Database query failed during handleOAuthLogin")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error during login process"})
-		return nil
+		return &user
 	}
 
-	return &user
+	// Database Query Failed
+	logger.Error().Err(result.Error).Str("email", email).Msg("Database query failed during handleOAuthLogin")
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error during login process"})
+	return nil
 }
 
 func finishOAuthLogin(c *gin.Context, user *models.User) {

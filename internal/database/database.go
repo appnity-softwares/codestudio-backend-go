@@ -2,6 +2,7 @@ package database
 
 import (
 	"log"
+	"sync"
 	"time"
 
 	"github.com/pushp314/devconnect-backend/internal/config"
@@ -11,6 +12,14 @@ import (
 )
 
 var DB *gorm.DB
+
+// Feature Flag Cache
+var (
+	featureCache      = make(map[string]bool)
+	featureCacheMutex sync.RWMutex
+	lastCacheUpdate   time.Time
+	cacheTTL          = 1 * time.Minute
+)
 
 func Connect() {
 	dsn := config.AppConfig.DatabaseURL
@@ -37,10 +46,32 @@ func Connect() {
 }
 
 // IsFeatureEnabled checks if a system setting (feature flag) is set to "true"
+// Uses in-memory caching with 1-minute TTL to reduce DB load (Performance Optimization)
 func IsFeatureEnabled(key string) bool {
 	if DB == nil {
 		return false
 	}
+
+	featureCacheMutex.RLock()
+	if time.Since(lastCacheUpdate) < cacheTTL {
+		val, exists := featureCache[key]
+		featureCacheMutex.RUnlock()
+		if exists {
+			return val
+		}
+	} else {
+		featureCacheMutex.RUnlock() // Release read lock to acquire write lock
+		// Refresh Cache
+		refreshCache()
+		featureCacheMutex.RLock() // Re-acquire read lock
+		val, exists := featureCache[key]
+		featureCacheMutex.RUnlock()
+		if exists {
+			return val
+		}
+	}
+
+	// Fallback for uncached keys during TTL
 	var setting struct {
 		Value string
 	}
@@ -48,4 +79,31 @@ func IsFeatureEnabled(key string) bool {
 		return false
 	}
 	return setting.Value == "true"
+}
+
+func refreshCache() {
+	featureCacheMutex.Lock()
+	defer featureCacheMutex.Unlock()
+
+	// Double check time in case another routine refreshed it waiting for lock
+	if time.Since(lastCacheUpdate) < cacheTTL {
+		return
+	}
+
+	type Setting struct {
+		Key   string
+		Value string
+	}
+	var settings []Setting
+	if err := DB.Table("system_settings").Select("key, value").Find(&settings).Error; err != nil {
+		log.Printf("Error refreshing feature cache: %v", err)
+		return
+	}
+
+	// Rebuild map
+	featureCache = make(map[string]bool)
+	for _, s := range settings {
+		featureCache[s.Key] = (s.Value == "true")
+	}
+	lastCacheUpdate = time.Now()
 }

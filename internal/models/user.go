@@ -91,7 +91,8 @@ type User struct {
 
 	Password string `json:"-"`
 
-	Count UserCount `gorm:"-" json:"_count"`
+	Count       UserCount `gorm:"-" json:"_count"`
+	IsFollowing bool      `gorm:"-" json:"isFollowing"`
 }
 
 type UserCount struct {

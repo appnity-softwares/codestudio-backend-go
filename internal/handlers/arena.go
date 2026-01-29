@@ -366,7 +366,7 @@ func GetEventAccess(c *gin.Context) {
 
 // CreateEvent (Admin)
 func CreateEvent(c *gin.Context) {
-	// TODO: Admin check verification
+	// Admin verification is handled by middleware
 	var input CreateEventInput
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
