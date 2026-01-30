@@ -1028,6 +1028,10 @@ func AdminUpdateSystemSettings(c *gin.Context) {
 		models.SettingFeatureSocialChat:           true,
 		models.SettingFeatureSocialFollow:         true,
 		models.SettingFeatureSocialFeed:           true,
+		models.SettingFeatureStorePowerups:        true,
+		models.SettingFeatureStoreThemes:          true,
+		models.SettingDockBadges:                  true,
+		models.SettingCustomAuras:                 true,
 	}
 	if !validKeys[req.Key] {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid setting key"})
@@ -1084,6 +1088,8 @@ func PublicGetSystemStatus(c *gin.Context) {
 		models.SettingFeatureQuestsEnabled,
 		models.SettingFeatureGithubStats,
 		models.SettingFeatureSidebarNewBadge,
+		models.SettingFeatureStorePowerups,
+		models.SettingFeatureStoreThemes,
 		"custom_auras",
 	}).Find(&settings)
 
@@ -1093,6 +1099,33 @@ func PublicGetSystemStatus(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"settings": settingsMap})
+}
+
+// PublicGetAdmins returns admin user IDs for auto-follow on login
+func PublicGetAdmins(c *gin.Context) {
+	var admins []models.User
+	database.DB.Select("id", "username", "name", "image").
+		Where("role = ?", "ADMIN").
+		Find(&admins)
+
+	type adminInfo struct {
+		ID       string `json:"id"`
+		Username string `json:"username"`
+		Name     string `json:"name"`
+		Image    string `json:"image,omitempty"`
+	}
+
+	result := make([]adminInfo, 0, len(admins))
+	for _, a := range admins {
+		result = append(result, adminInfo{
+			ID:       a.ID,
+			Username: a.Username,
+			Name:     a.Name,
+			Image:    a.Image,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{"admins": result})
 }
 
 // PublicGetLandingStats returns real platform stats for the landing page

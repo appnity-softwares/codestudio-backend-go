@@ -621,17 +621,11 @@ func ListCommunityUsers(c *gin.Context) {
 	// Sorting
 	switch sort {
 	case "recommended":
-		// Get current user's preferences if logged in
-		userID, exists := c.Get("userId")
-		if exists {
-			var me models.User
-			if err := database.DB.First(&me, "id = ?", userID).Error; err == nil && (len(me.PreferredLanguages) > 0 || len(me.Interests) > 0) {
-				// Use PostgreSQL && operator for array overlap
-				// We'll prioritize users who have overlap, then trust score
-				query = query.Order(database.DB.Raw("(CASE WHEN preferred_languages && ? OR interests && ? THEN 1 ELSE 0 END) DESC", me.PreferredLanguages, me.Interests))
-			}
-		}
-		query = query.Order("trust_score desc, \"createdAt\" desc")
+		// Influence & Discovery Boost: Equipped Aura (Top) > Calculated Influence > XP > Trust Score
+		query = query.Order(database.DB.Raw("(CASE WHEN \"equippedAura\" != '' AND \"equippedAura\" IS NOT NULL THEN 1 ELSE 0 END) DESC"))
+		// Calculated Influence Score (Proxy): Trust + Engagement
+		query = query.Order("((trust_score * 2) + (snippet_count * 10) + (contest_count * 25) + (xp / 100)) DESC")
+		query = query.Order("\"createdAt\" desc")
 	case "active":
 		query = query.Order("\"createdAt\" desc")
 	case "trust":
@@ -639,8 +633,9 @@ func ListCommunityUsers(c *gin.Context) {
 	case "snippets":
 		query = query.Order("trust_score desc")
 	default:
-		// Default to recommended
-		query = query.Order("trust_score desc")
+		// Default to recommended boost: Aura > Calculated Influence
+		query = query.Order(database.DB.Raw("(CASE WHEN \"equippedAura\" != '' AND \"equippedAura\" IS NOT NULL THEN 1 ELSE 0 END) DESC"))
+		query = query.Order("((trust_score * 2) + (snippet_count * 10) + (contest_count * 25) + (xp / 100)) DESC")
 	}
 
 	var users []models.User
@@ -1067,16 +1062,20 @@ func GetBadges(c *gin.Context) {
 	})
 }
 
-// GetGlobalLeaderboard returns top users by XP
+// GetGlobalLeaderboard returns top users by XP or Influence
 func GetGlobalLeaderboard(c *gin.Context) {
+	lbType := c.Query("type") // "creators" or "xp" (default)
 	var users []models.User
-	// Order by XP descending, limit to 20
-	// We only show users with XP > 0 and who completed onboarding
-	if err := database.DB.Model(&models.User{}).
-		Where("xp > 0 AND onboarding_completed = ?", true).
-		Order("xp DESC, \"createdAt\" ASC").
-		Limit(20).
-		Find(&users).Error; err != nil {
+	query := database.DB.Model(&models.User{}).Where("onboarding_completed = ?", true)
+
+	if lbType == "creators" {
+		// Influence Score = trust_score + (snippet_count * 10) + (contest_count * 25) + (linkersCount * 50) + (xp / 100)
+		query = query.Order("((trust_score) + (snippet_count * 10) + (contest_count * 25) + (\"linkersCount\" * 50) + (xp / 100)) DESC")
+	} else {
+		query = query.Where("xp > 0").Order("xp DESC, \"createdAt\" ASC")
+	}
+
+	if err := query.Limit(20).Find(&users).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch leaderboard"})
 		return
 	}
@@ -1084,14 +1083,19 @@ func GetGlobalLeaderboard(c *gin.Context) {
 	// Sanitize output
 	var safeUsers []gin.H
 	for i, u := range users {
+		// Calculate display influence score
+		influence := u.TrustScore + (u.WrappedSnippetCount * 10) + (u.WrappedContestCount * 25) + (u.LinkersCount * 50) + (u.XP / 100)
+
 		safeUsers = append(safeUsers, gin.H{
-			"rank":         i + 1,
-			"username":     u.Username,
-			"name":         u.Name,
-			"image":        u.Image,
-			"xp":           u.XP,
-			"equippedAura": u.EquippedAura,
-			"id":           u.ID,
+			"rank":           i + 1,
+			"username":       u.Username,
+			"name":           u.Name,
+			"image":          u.Image,
+			"xp":             u.XP,
+			"equippedAura":   u.EquippedAura,
+			"id":             u.ID,
+			"snippetsCount":  u.WrappedSnippetCount,
+			"influenceScore": influence,
 		})
 	}
 

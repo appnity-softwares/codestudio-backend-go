@@ -90,6 +90,8 @@ const (
 	SettingFeatureSocialChat           = "feature_social_chat"
 	SettingFeatureSocialFollow         = "feature_social_follow"
 	SettingFeatureSocialFeed           = "feature_social_feed"
+	SettingFeatureStorePowerups        = "feature_store_powerups"
+	SettingFeatureStoreThemes          = "feature_store_themes"
 
 	// System Banner
 	SettingBannerVisible = "system_banner_visible"
@@ -97,6 +99,10 @@ const (
 	SettingBannerBadge   = "system_banner_badge"
 	SettingBannerContent = "system_banner_content" // JSON or Text
 	SettingBannerLink    = "system_banner_link"
+
+	// Admin Dashboard (Additional)
+	SettingDockBadges  = "dock_badges"  // JSON: { "/path": "BADGE_TEXT" }
+	SettingCustomAuras = "custom_auras" // JSON: [{ id, name, gradient, pulse, minXP }]
 )
 
 // AdminAuditLog extends AdminAction with IP tracking (used for detailed audit)

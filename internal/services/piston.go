@@ -20,9 +20,9 @@ type PistonExecuteRequest struct {
 	Files          []File   `json:"files"`
 	Stdin          string   `json:"stdin"`
 	Args           []string `json:"args"`
-	RunTimeout     int      `json:"run_timeout"`      // milliseconds
-	CompileTimeout int      `json:"compile_timeout"`  // milliseconds
-	RunMemoryLimit int      `json:"run_memory_limit"` // bytes
+	RunTimeout     int      `json:"run_timeout"`                // milliseconds
+	CompileTimeout int      `json:"compile_timeout"`            // milliseconds
+	RunMemoryLimit int      `json:"run_memory_limit,omitempty"` // bytes (optional)
 }
 
 type File struct {
@@ -82,13 +82,18 @@ func normalizePistonLanguage(lang string) string {
 	langMap := map[string]string{
 		"typescript": "typescript",
 		"javascript": "javascript",
+		"node":       "javascript",
 		"python":     "python",
+		"python3":    "python",
 		"go":         "go",
+		"golang":     "go",
 		"cpp":        "c++",
 		"c++":        "c++",
 		"java":       "java",
 		"rust":       "rust",
 		"c":          "c",
+		"php":        "php",
+		"ruby":       "ruby",
 	}
 
 	if pistonLang, ok := langMap[lang]; ok {
@@ -110,6 +115,8 @@ func getFileExtension(lang string) string {
 		"java":       "Main.java",
 		"rust":       "main.rs",
 		"c":          "main.c",
+		"php":        "index.php",
+		"ruby":       "main.rb",
 	}
 
 	if ext, ok := extMap[lang]; ok {
@@ -171,20 +178,11 @@ func ExecuteCode(language, code, stdin string, timeLimit float64, memoryLimit in
 		runTimeout = int(timeLimit * 1000)
 	}
 
-	// memoryLimit is MB (int). Piston wants bytes?
-	// Usually Piston expects bytes or string with suffix? Docs say int = bytes.
-	// But standard "128" passed from handler is likely MB.
-	// Let's safe guard. If < 10000, assume MB.
-	runMemory := memoryLimit
-	if runMemory > 0 && runMemory < 10000 {
-		runMemory = runMemory * 1024 * 1024 // Convert MB to Bytes
-	} else if runMemory == 0 {
-		runMemory = 512 * 1024 * 1024 // Default 512MB (Safe balance for public API nodes)
-	}
+	runMemory := 0 // Set to 0 to omit from JSON (Piston will use its own safe defaults)
 
 	// Normalize language name for Piston API
 	pistonLang := normalizePistonLanguage(language)
-	fileName := getFileExtension(language)
+	fileName := getFileExtension(pistonLang) // Use normalized lang for consistent file extension
 	workingCode := code
 
 	// Build request
@@ -208,17 +206,27 @@ func ExecuteCode(language, code, stdin string, timeLimit float64, memoryLimit in
 	start := time.Now()
 	resp, err := http.Post(PistonAPIURL, "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
-		return nil, err
+		logger.Error().Err(err).Str("lang", language).Msg("Failed to connect to Piston API")
+		return nil, fmt.Errorf("execution service unavailable: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		// Try to read error body for more details
+		body := make([]byte, 1024)
+		n, _ := resp.Body.Read(body)
+		logger.Error().
+			Str("lang", language).
+			Int("status", resp.StatusCode).
+			Str("body", string(body[:n])).
+			Msg("Piston API returned error")
 		return nil, fmt.Errorf("piston api failed with status: %d", resp.StatusCode)
 	}
 
 	var result PistonExecuteResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, err
+		logger.Error().Err(err).Str("lang", language).Msg("Failed to decode Piston response")
+		return nil, fmt.Errorf("failed to parse execution result: %v", err)
 	}
 
 	logger.Info().

@@ -177,6 +177,7 @@ func main() {
 
 		// Public system status (for maintenance page)
 		api.GET("/system/status", handlers.PublicGetSystemStatus)
+		api.GET("/system/admins", handlers.PublicGetAdmins)
 		api.GET("/landing/stats", handlers.PublicGetLandingStats)
 		routes.RegisterShortenerAPIRoutes(api)
 
