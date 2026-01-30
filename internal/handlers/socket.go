@@ -101,7 +101,7 @@ func InitSocketServer() *socketio.Server {
 
 		claims, err := utils.ValidateToken(token)
 		if err != nil {
-			log.Println("Socket Connection Rejected: Invalid token", s.ID(), err)
+			log.Println("Socket Connection Rejected: Invalid token", s.ID())
 			return fmt.Errorf("invalid token")
 		}
 

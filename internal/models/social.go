@@ -44,10 +44,10 @@ type Comment struct {
 
 	Content string `gorm:"type:text" json:"content"`
 
-	UserID string `json:"userId"`
+	UserID string `gorm:"index" json:"userId"`
 	User   User   `gorm:"foreignKey:UserID" json:"user"`
 
-	SnippetID string  `json:"snippetId"`
+	SnippetID string  `gorm:"index" json:"snippetId"`
 	Snippet   Snippet `gorm:"foreignKey:SnippetID" json:"-"`
 }
 

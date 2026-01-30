@@ -74,3 +74,42 @@ func CacheInvalidate(pattern string) error {
 	}
 	return nil
 }
+
+// ===========================================
+// P0 FIX: JWT Token Blacklist for Revocation
+// ===========================================
+
+const tokenBlacklistPrefix = "jwt:blacklist:"
+
+// BlacklistToken adds a token JTI to the blacklist with the given TTL
+// This is used for logout and password reset to immediately invalidate tokens
+func BlacklistToken(jti string, ttl time.Duration) error {
+	if Redis == nil {
+		return fmt.Errorf("redis not initialized")
+	}
+	if jti == "" {
+		return nil // Silently ignore tokens without JTI (legacy tokens)
+	}
+
+	key := tokenBlacklistPrefix + jti
+	return Redis.Set(Ctx, key, "1", ttl).Err()
+}
+
+// IsTokenBlacklisted checks if a token JTI is in the blacklist
+// Returns true if blacklisted, false otherwise
+// On Redis error, returns false to avoid blocking auth (fail-open for availability)
+func IsTokenBlacklisted(jti string) bool {
+	if Redis == nil || jti == "" {
+		return false // If Redis is down or no JTI, allow through (legacy compat)
+	}
+
+	key := tokenBlacklistPrefix + jti
+	exists, err := Redis.Exists(Ctx, key).Result()
+	if err != nil {
+		// Log error but don't block auth on Redis failure
+		log.Printf("Warning: Redis blacklist check failed: %v", err)
+		return false
+	}
+
+	return exists > 0
+}

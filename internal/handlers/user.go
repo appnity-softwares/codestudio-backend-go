@@ -256,7 +256,11 @@ func GetProfile(c *gin.Context) {
 	query := database.DB.Preload("PinnedSnippet").Preload("PinnedSnippet.Author")
 
 	if username != "" && username != "me" {
-		result = query.Where("username = ? OR id = ?", username, username).First(&user).Error
+		if utils.IsUUID(username) {
+			result = query.Where("username = ? OR id = ?", username, username).First(&user).Error
+		} else {
+			result = query.Where("username = ?", username).First(&user).Error
+		}
 
 		// Blocking Check
 		if result == nil && viewerID != "" && viewerID != user.ID {
@@ -590,15 +594,18 @@ func ListCommunityUsers(c *gin.Context) {
 	search := c.Query("search")
 	sort := c.Query("sort")
 
-	pageStr := c.Query("page")
-	page := 1
-	if pageStr != "" {
-		if p, err := strconv.Atoi(pageStr); err == nil && p > 0 {
-			page = p
-		}
+	// P0 FIX: Accept limit from query with max enforcement
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	if page < 1 {
+		page = 1
 	}
-
-	limit := 20
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if limit < 1 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100 // Hard max
+	}
 	offset := (page - 1) * limit
 
 	query := database.DB.Model(&models.User{}).Where("search_visible = ? AND onboarding_completed = ?", true, true)
@@ -639,9 +646,16 @@ func ListCommunityUsers(c *gin.Context) {
 	}
 
 	var users []models.User
-	if err := query.Limit(limit).Offset(offset).Find(&users).Error; err != nil {
+	// Fetch limit+1 to determine hasMore
+	if err := query.Limit(limit + 1).Offset(offset).Find(&users).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch community"})
 		return
+	}
+
+	// Determine if there are more results
+	hasMore := len(users) > limit
+	if hasMore {
+		users = users[:limit] // Trim to requested limit
 	}
 
 	// Sanitize List
@@ -671,7 +685,14 @@ func ListCommunityUsers(c *gin.Context) {
 		})
 	}
 
-	c.JSON(http.StatusOK, gin.H{"users": safeUsers, "page": page})
+	c.JSON(http.StatusOK, gin.H{
+		"data":    safeUsers,
+		"page":    page,
+		"limit":   limit,
+		"hasMore": hasMore,
+		// Legacy field for backward compatibility
+		"users": safeUsers,
+	})
 }
 
 // SearchSuggestions handles GET /community/search-suggestions
@@ -846,12 +867,28 @@ func GetUserSnippets(c *gin.Context) {
 	}
 
 	snippets := []models.Snippet{}
+	// P0 FIX: Add Pagination
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	if page < 1 {
+		page = 1
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if limit < 1 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	offset := (page - 1) * limit
+
 	// Postgres is case-sensitive for quoted identifiers.
 	// The DB table is "Snippet" and columns are "authorId", "createdAt".
+	// Fetch limit+1 to determine hasMore
 	if err := database.DB.Model(&models.Snippet{}).
 		Preload("Author").
 		Where("\"authorId\" = ?", targetUser.ID).
 		Order("\"createdAt\" DESC").
+		Limit(limit + 1).Offset(offset).
 		Find(&snippets).Error; err != nil {
 		fmt.Printf("Error fetching user snippets: %v\n", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -859,6 +896,12 @@ func GetUserSnippets(c *gin.Context) {
 			"details": err.Error(),
 		})
 		return
+	}
+
+	// Determine if there are more results
+	hasMore := len(snippets) > limit
+	if hasMore {
+		snippets = snippets[:limit] // Trim to requested limit
 	}
 
 	// 3. Populate Interaction Status (ViewerReaction)
@@ -886,7 +929,14 @@ func GetUserSnippets(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"snippets": snippets})
+	c.JSON(http.StatusOK, gin.H{
+		"data":    snippets,
+		"page":    page,
+		"limit":   limit,
+		"hasMore": hasMore,
+		// Legacy field for backward compatibility
+		"snippets": snippets,
+	})
 }
 
 // GetBadges handles GET /users/:username/badges

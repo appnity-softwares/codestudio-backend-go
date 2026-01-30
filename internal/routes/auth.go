@@ -9,7 +9,8 @@ import (
 func RegisterAuthRoutes(r gin.IRouter) {
 	r.POST("/register", middleware.RequireRegistrationOpen(), handlers.Register)
 	r.POST("/login", handlers.Login)
-	r.POST("/logout", handlers.Logout)
+	// P0 FIX: Protect logout with AuthMiddleware to get claims for revocation
+	r.POST("/logout", middleware.AuthMiddleware(), handlers.Logout)
 
 	// OAuth
 	r.GET("/google/login", handlers.GoogleLogin)

@@ -53,7 +53,7 @@ type User struct {
 	IsModerator         bool           `gorm:"default:false" json:"isModerator"`
 
 	// Anti-Cheat (MVP)
-	TrustScore int `gorm:"default:100" json:"trustScore"`
+	TrustScore int `gorm:"default:100;index" json:"trustScore"`
 
 	// Arrays (Postgres String Array)
 	SelectedPublicSnippetIds pq.StringArray `gorm:"type:text[]" json:"selectedPublicSnippetIds"` // GORM might need custom handling for arrays or simpler approach
@@ -80,7 +80,7 @@ type User struct {
 	WrappedSnippetCount int    `gorm:"default:0;column:snippet_count" json:"snippetCount"`
 	WrappedViewCount    int    `gorm:"default:0;column:view_count" json:"viewCount"`
 	WrappedContestCount int    `gorm:"default:0;column:contest_count" json:"contestCount"`
-	XP                  int    `gorm:"default:0" json:"xp"`
+	XP                  int    `gorm:"default:0;index" json:"xp"`
 	Level               int    `gorm:"default:1" json:"level"`
 	EquippedAura        string `gorm:"column:equippedAura" json:"equippedAura"`
 	EquippedTheme       string `gorm:"column:equippedTheme" json:"equippedTheme"`

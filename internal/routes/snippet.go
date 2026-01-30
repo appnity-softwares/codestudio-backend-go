@@ -13,8 +13,10 @@ func RegisterSnippetRoutes(r gin.IRouter) {
 		snippets.GET("", middleware.OptionalAuthMiddleware(), handlers.ListSnippets)
 		snippets.GET("/:id", middleware.OptionalAuthMiddleware(), handlers.GetSnippet)
 		snippets.GET("/:id/similar", handlers.GetSimilarSnippets)
-		snippets.POST("/:id/run", middleware.OptionalAuthMiddleware(), handlers.RunSnippet)
-		snippets.POST("/execute", middleware.ExecuteRateLimit(), handlers.ExecuteCode)
+		// P0 FIX: Add rate limiting to RunSnippet to prevent Piston abuse
+		snippets.POST("/:id/run", middleware.OptionalAuthMiddleware(), middleware.ExecuteRateLimit(), handlers.RunSnippet)
+		// P0 FIX: Require authentication for execute endpoint + rate limiting
+		snippets.POST("/execute", middleware.AuthMiddleware(), middleware.ExecuteRateLimit(), handlers.ExecuteCode)
 
 		// Protected Base (Auth Only)
 		protected := snippets.Group("")
@@ -33,7 +35,7 @@ func RegisterSnippetRoutes(r gin.IRouter) {
 				creationEnabled.DELETE("/:id", handlers.DeleteSnippet)
 				creationEnabled.PATCH("/:id/output", handlers.UpdateSnippetOutput)
 				creationEnabled.POST("/:id/publish", handlers.PublishSnippet)
-
+				creationEnabled.POST("/:id/fork", handlers.ForkSnippet)
 			}
 		}
 	}

@@ -41,6 +41,31 @@ func GetUnreadCount(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"count": count})
 }
 
+// GetAggregateUnreadCount GET /notifications/aggregate
+func GetAggregateUnreadCount(c *gin.Context) {
+	userID, exists := c.Get("userId")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	var notificationCount int64
+	database.DB.Model(&models.Notification{}).Where("user_id = ? AND is_read = ?", userID, false).Count(&notificationCount)
+
+	var messageCount int64
+	database.DB.Model(&models.Message{}).Where("recipient_id = ? AND is_read = ?", userID, false).Count(&messageCount)
+
+	var requestCount int64
+	database.DB.Model(&models.LinkRequest{}).Where("receiver_id = ? AND status = ?", userID, models.LinkRequestPending).Count(&requestCount)
+
+	c.JSON(http.StatusOK, gin.H{
+		"notifications": notificationCount,
+		"messages":      messageCount,
+		"linkRequests":  requestCount,
+		"total":         notificationCount + messageCount + requestCount,
+	})
+}
+
 // MarkNotificationRead PUT /notifications/:id/read
 func MarkNotificationRead(c *gin.Context) {
 	userID, exists := c.Get("userId")
@@ -132,4 +157,16 @@ func CreateNotification(tx *gorm.DB, notification models.Notification) error {
 
 	SendNotificationToUser(notification.UserID, data)
 	return nil
+}
+
+// NotifyNewBadges sends notifications for a list of earned badges
+func NotifyNewBadges(userID string, badges []models.Badge) {
+	for _, b := range badges {
+		notification := models.Notification{
+			UserID:  userID,
+			Type:    models.NotificationTypeAchievement,
+			Message: "Unlocked Badge: " + b.Name,
+		}
+		CreateNotification(database.DB, notification)
+	}
 }

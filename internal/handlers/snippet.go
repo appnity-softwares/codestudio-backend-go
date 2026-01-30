@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -101,9 +102,30 @@ func ListSnippets(c *gin.Context) {
 		query = query.Order("\"createdAt\" desc")
 	}
 
-	if result := query.Find(&snippets); result.Error != nil {
+	// P0 FIX: Add Pagination to prevent fetching all snippets (DoS risk)
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	if page < 1 {
+		page = 1
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if limit < 1 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	offset := (page - 1) * limit
+
+	// Fetch limit+1 to determine hasMore
+	if result := query.Limit(limit + 1).Offset(offset).Find(&snippets); result.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch snippets"})
 		return
+	}
+
+	// Determine if there are more results
+	hasMore := len(snippets) > limit
+	if hasMore {
+		snippets = snippets[:limit] // Trim to requested limit
 	}
 
 	// Populate ViewerReaction for authenticated users
@@ -142,7 +164,14 @@ func ListSnippets(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"snippets": snippets})
+	c.JSON(http.StatusOK, gin.H{
+		"data":    snippets,
+		"page":    page,
+		"limit":   limit,
+		"hasMore": hasMore,
+		// Legacy field for backward compatibility
+		"snippets": snippets,
+	})
 }
 
 // CreateSnippet handles POST /snippets
@@ -210,14 +239,94 @@ func CreateSnippet(c *gin.Context) {
 	// Reward XP for creating a snippet (if public)
 	if snippet.Visibility == "public" {
 		database.DB.Model(&models.User{}).Where("id = ?", userID.(string)).Update("xp", gorm.Expr("xp + ?", 50))
+		services.LogActivity(userID.(string), models.ActivityNewSnippet, snippet.ID, "Created a new snippet: "+snippet.Title)
 	}
 
 	// Check for Badges
 	newBadges, _ := services.CheckBadges(userID.(string))
+	NotifyNewBadges(userID.(string), newBadges)
 
 	c.JSON(http.StatusCreated, gin.H{
 		"snippet":   snippet,
 		"newBadges": newBadges,
+	})
+}
+
+// ForkSnippet handles POST /snippets/:id/fork
+func ForkSnippet(c *gin.Context) {
+	userID, exists := c.Get("userId")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	id := c.Param("id")
+	var original models.Snippet
+	if err := database.DB.Preload("Author").First(&original, "id = ?", id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Snippet not found"})
+		return
+	}
+
+	// Create the fork
+	fork := models.Snippet{
+		ID:             utils.GenerateID(),
+		Title:          "Fork of " + original.Title,
+		Description:    original.Description,
+		Language:       original.Language,
+		Code:           original.Code,
+		Visibility:     original.Visibility,
+		AuthorID:       userID.(string),
+		ForkedFromID:   &original.ID,
+		Tags:           original.Tags,
+		OutputSnapshot: original.OutputSnapshot,
+		PreviewType:    original.PreviewType,
+		Type:           original.Type,
+		Difficulty:     original.Difficulty,
+		Runtime:        original.Runtime,
+		ReferenceURL:   original.ReferenceURL,
+		Status:         "DRAFT", // Always start as draft
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+
+	if result := database.DB.Create(&fork); result.Error != nil {
+		if strings.Contains(result.Error.Error(), "duplicate key value violates unique constraint") {
+			// If a fork with the same title exists, append timestamp
+			fork.Title = fork.Title + " (" + time.Now().Format("15:04:05") + ")"
+			if err := database.DB.Create(&fork).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": result.Error.Error()})
+			return
+		}
+	}
+
+	// Increment copy count of original (forking is a form of copying)
+	database.DB.Model(&original).Update("copy_count", gorm.Expr("copy_count + 1"))
+
+	// Log activity
+	services.LogActivity(userID.(string), models.ActivityFork, fork.ID, "Forked a snippet: "+original.Title)
+
+	// Notify original author
+	if original.AuthorID != userID.(string) {
+		notification := models.Notification{
+			UserID:    original.AuthorID,
+			ActorID:   userID.(string),
+			Type:      models.NotificationTypeFork,
+			SnippetID: &original.ID,
+			Message:   "forked your snippet: " + original.Title,
+		}
+		// ForkSnippet doesn't have a transaction by default, but CreateNotification uses tx.
+		// Let's use database.DB if not in tx, or wrap in tx.
+		// For simplicity, let's just use database.DB for now if we can't easily get a tx.
+		// Wait, CreateNotification expects *gorm.DB.
+		CreateNotification(database.DB, notification)
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"snippet": fork,
 	})
 }
 
@@ -426,6 +535,15 @@ func RunSnippet(c *gin.Context) {
 		return
 	}
 
+	// P0 FIX: Enforce code size limits to prevent Piston abuse
+	if len(snippet.Code) > MaxCodeSizeBytes {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Snippet code too large to execute",
+			"limit": "64KB maximum",
+		})
+		return
+	}
+
 	// MVP: Standardize execution limits (e.g., 2s timeout)
 	// Input logic is removed for MVP as per requirements (No input handling)
 	start := time.Now()
@@ -614,9 +732,30 @@ func GetFeed(c *gin.Context) {
 		query = query.Order("\"createdAt\" DESC")
 	}
 
-	if err := query.Limit(20).Find(&snippets).Error; err != nil {
+	// P0 FIX: Add Pagination to Feed (replace hardcoded limit)
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	if page < 1 {
+		page = 1
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if limit < 1 {
+		limit = 20
+	}
+	if limit > 50 {
+		limit = 50 // Stricter limit for feed
+	}
+	offset := (page - 1) * limit
+
+	// Fetch limit+1 to determine hasMore
+	if err := query.Limit(limit + 1).Offset(offset).Find(&snippets).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch feed"})
 		return
+	}
+
+	// Determine if there are more results
+	hasMore := len(snippets) > limit
+	if hasMore {
+		snippets = snippets[:limit] // Trim to requested limit
 	}
 
 	// Populate ViewerReaction for authenticated users
@@ -658,7 +797,15 @@ func GetFeed(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"snippets": snippets, "bucket": bucket})
+	c.JSON(http.StatusOK, gin.H{
+		"data":    snippets,
+		"page":    page,
+		"limit":   limit,
+		"hasMore": hasMore,
+		"bucket":  bucket,
+		// Legacy field for backward compatibility
+		"snippets": snippets,
+	})
 }
 
 // RecordSnippetCopy handles POST /api/snippets/:id/copy

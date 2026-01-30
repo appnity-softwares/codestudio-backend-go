@@ -95,6 +95,7 @@ func main() {
 		&models.MessageReaction{},
 		&models.Mention{},
 		&models.ShortLink{},
+		&models.UserActivity{},
 	}
 
 	for _, m := range tableModels {
@@ -199,6 +200,7 @@ func main() {
 		routes.RegisterPlaylistRoutes(protected) // v1.3: Playlist Tracks
 		routes.RegisterSocialRoutes(protected)   // v1.3: Social Graph (Link/Unlink)
 		routes.RegisterNotificationRoutes(protected)
+		protected.GET("/activity/feed", handlers.GetActivityFeed)
 	}
 
 	// Enhanced health check with DB and Redis status

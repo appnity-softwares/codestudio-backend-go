@@ -170,8 +170,62 @@ func Login(c *gin.Context) {
 	})
 }
 
-// Logout invalidates the token on the client side
+// Logout invalidates the token server-side by adding it to Redis blacklist
+// P0 FIX: Real logout implementation with token revocation
 func Logout(c *gin.Context) {
+	// Get claims from context (set by AuthMiddleware)
+	claimsInterface, exists := c.Get("claims")
+	if !exists {
+		// Fallback: try to extract from header if middleware didn't set it
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			c.JSON(http.StatusOK, gin.H{"message": "Already logged out"})
+			return
+		}
+
+		parts := strings.Split(authHeader, " ")
+		if len(parts) != 2 || parts[0] != "Bearer" {
+			c.JSON(http.StatusOK, gin.H{"message": "Already logged out"})
+			return
+		}
+
+		claims, err := utils.ValidateToken(parts[1])
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"message": "Already logged out"})
+			return
+		}
+		claimsInterface = claims
+	}
+
+	claims, ok := claimsInterface.(*utils.Claims)
+	if !ok || claims == nil {
+		c.JSON(http.StatusOK, gin.H{"message": "Already logged out"})
+		return
+	}
+
+	jti := claims.GetJTI()
+	if jti == "" {
+		// Legacy token without JTI - still respond success
+		logger.Warn().Msg("Logout called with legacy token (no JTI)")
+		c.JSON(http.StatusOK, gin.H{"message": "Successfully logged out"})
+		return
+	}
+
+	// Calculate remaining TTL until token expiry
+	expiresAt := claims.GetExpiresAt()
+	ttl := time.Until(expiresAt)
+	if ttl <= 0 {
+		// Token already expired, nothing to blacklist
+		c.JSON(http.StatusOK, gin.H{"message": "Successfully logged out"})
+		return
+	}
+
+	// Add token to blacklist with remaining TTL
+	if err := database.BlacklistToken(jti, ttl); err != nil {
+		// Log error but still respond success (fail gracefully)
+		logger.Error().Err(err).Str("jti", jti).Msg("Failed to blacklist token")
+	}
+
 	c.JSON(http.StatusOK, gin.H{"message": "Successfully logged out"})
 }
 
@@ -538,9 +592,10 @@ func ForgotPassword(c *gin.Context) {
 	}
 
 	// In a real app, send email here.
-	logger.Info().Str("reset_token", resetToken).Msg("Password reset token generated")
-	// Use Fprintf or similar if you really need to output to console for user to copy-paste easily without JSON clutter
-	fmt.Printf("\n🔗 Reset Link: %s/auth/reset-password?token=%s\n\n", config.AppConfig.FrontendURL, resetToken)
+	// P0 FIX: Removed sensitive token logging.
+	// TODO: Integrate Email Service (SendGrid/AWS SES) to send this link:
+	// link := fmt.Sprintf("%s/auth/reset-password?token=%s", config.AppConfig.FrontendURL, resetToken)
+	logger.Info().Str("email", input.Email).Msg("Password reset token generated and (mock) sent")
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "If this email is registered, you will receive a password reset link.",
@@ -562,13 +617,15 @@ func ResetPassword(c *gin.Context) {
 
 	var user models.User
 	if err := database.DB.Where("reset_token = ?", input.Token).First(&user).Error; err != nil {
-		logger.Warn().Str("token", input.Token).Msg("Password reset failed: invalid token")
+		// P0 FIX: Don't log the invalid token
+		logger.Warn().Msg("Password reset failed: invalid or expired token")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid or expired token"})
 		return
 	}
 
 	if user.ResetTokenExpiry != nil && time.Now().After(*user.ResetTokenExpiry) {
-		logger.Warn().Str("token", input.Token).Msg("Password reset failed: expired token")
+		// P0 FIX: Don't log the expired token
+		logger.Warn().Msg("Password reset failed: expired token")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Token expired"})
 		return
 	}

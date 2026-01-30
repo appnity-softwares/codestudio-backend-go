@@ -10,7 +10,7 @@ import (
 
 type Snippet struct {
 	ID        string         `gorm:"primaryKey;type:text" json:"id"`
-	CreatedAt time.Time      `gorm:"column:createdAt" json:"createdAt"`
+	CreatedAt time.Time      `gorm:"column:createdAt;index" json:"createdAt"`
 	UpdatedAt time.Time      `gorm:"column:updatedAt" json:"updatedAt"`
 	DeletedAt gorm.DeletedAt `gorm:"index;column:deletedAt" json:"-"`
 
@@ -51,8 +51,10 @@ type Snippet struct {
 	StdinHistory        string `gorm:"type:text" json:"stdinHistory"` // JSON string of interactive session
 
 	// Relations
-	AuthorID string `gorm:"column:authorId" json:"authorId"`
-	Author   User   `gorm:"foreignKey:AuthorID" json:"author"`
+	AuthorID     string   `gorm:"column:authorId;index" json:"authorId"`
+	Author       User     `gorm:"foreignKey:AuthorID" json:"author"`
+	ForkedFromID *string  `gorm:"column:forkedFromId" json:"forkedFromId"`
+	ForkedFrom   *Snippet `gorm:"foreignKey:ForkedFromID" json:"forkedFrom,omitempty"`
 }
 
 func (Snippet) TableName() string {

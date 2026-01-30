@@ -16,6 +16,9 @@ const (
 	NotificationTypeSystem      NotificationType = "SYSTEM"
 	NotificationTypeLinkRequest NotificationType = "LINK_REQUEST"
 	NotificationTypeLinkAccept  NotificationType = "LINK_ACCEPT"
+	NotificationTypeFollow      NotificationType = "FOLLOW"
+	NotificationTypeFork        NotificationType = "FORK"
+	NotificationTypeAchievement NotificationType = "ACHIEVEMENT"
 )
 
 type Notification struct {

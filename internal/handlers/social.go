@@ -4,14 +4,18 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pushp314/devconnect-backend/internal/database"
 	"github.com/pushp314/devconnect-backend/internal/models"
+	"github.com/pushp314/devconnect-backend/internal/services"
+	"github.com/pushp314/devconnect-backend/pkg/utils"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
-// LinkUser handles POST /users/:id/link (Follow)
+// LinkUser handles POST /users/:username/link (Follow)
 func LinkUser(c *gin.Context) {
 	fmt.Printf("[Social] Processing Link request for target: %s\n", c.Param("username"))
 	// 1. Get Auth User
@@ -22,17 +26,27 @@ func LinkUser(c *gin.Context) {
 	}
 
 	// 2. Get Target User
-	targetID := c.Param("username")
-	if linkerID.(string) == targetID {
+	targetParam := c.Param("username")
+	if linkerID.(string) == targetParam {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot link yourself"})
 		return
 	}
 
 	var targetUser models.User
 	// Search by username or ID
-	if err := database.DB.Where("username = ? OR id = ?", targetID, targetID).First(&targetUser).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
-		return
+	query := database.DB
+	if utils.IsUUID(targetParam) {
+		// Valid UUID: check both (ID match is likely)
+		if err := query.Where("username = ? OR id = ?", targetParam, targetParam).First(&targetUser).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			return
+		}
+	} else {
+		// Not a UUID: Check ONLY username to avoid Postgres UUID parse error
+		if err := query.Where("username = ?", targetParam).First(&targetUser).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			return
+		}
 	}
 	// Use the actual ID from the found user
 	actualTargetID := targetUser.ID
@@ -114,9 +128,38 @@ func LinkUser(c *gin.Context) {
 				LinkerID: linkerID.(string),
 				LinkedID: actualTargetID,
 			}
-			if err := tx.Create(&newLink).Error; err != nil {
-				return fmt.Errorf("create link: %w", err)
+			// Use OnConflict to handle duplicates safely without aborting the transaction
+			result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&newLink)
+			if result.Error != nil {
+				return fmt.Errorf("create link: %w", result.Error)
 			}
+
+			// If RowsAffected == 0, it means it already existed (duplicate).
+			// We can proceed, but we shouldn't award XP again.
+			// Note: gorm.ErrRecordNotFound logic below handles 'new' link xp,
+			// but we need to ensure we don't error out here.
+
+			// Use tx for activity logging to prevent deadlock/connection pool issues
+			activity := models.UserActivity{
+				Type:      models.ActivityFollow,
+				ActorID:   linkerID.(string),
+				TargetID:  actualTargetID,
+				Message:   "followed @" + targetUser.Username,
+				CreatedAt: time.Now(),
+			}
+			if err := tx.Create(&activity).Error; err != nil {
+				// Non-fatal, just log
+				fmt.Printf("[Social] Failed to log activity inside tx: %v\n", err)
+			}
+
+			// Send Notification
+			notification := models.Notification{
+				UserID:  actualTargetID,
+				ActorID: linkerID.(string),
+				Type:    models.NotificationTypeFollow,
+				Message: "started following you",
+			}
+			CreateNotification(tx, notification)
 		default:
 			return err
 		}
@@ -187,10 +230,10 @@ func LinkUser(c *gin.Context) {
 	fmt.Printf("[Social] Link success: %s -> %s\n", linkerID, actualTargetID)
 }
 
-// AcceptLinkRequest POST /users/link-requests/:id/accept
+// AcceptLinkRequest POST /users/link-requests/:requestId/accept
 func AcceptLinkRequest(c *gin.Context) {
 	userID := c.MustGet("userId").(string)
-	requestID := c.Param("id")
+	requestID := c.Param("requestId")
 
 	var req models.LinkRequest
 	if err := database.DB.First(&req, "id = ?", requestID).Error; err != nil {
@@ -229,6 +272,7 @@ func AcceptLinkRequest(c *gin.Context) {
 			if err := tx.Create(&newLink).Error; err != nil {
 				return err
 			}
+			services.LogActivity(req.SenderID, models.ActivityFollow, userID, "followed through request")
 		}
 
 		// Update counters
@@ -270,10 +314,10 @@ func AcceptLinkRequest(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Request accepted"})
 }
 
-// RejectLinkRequest POST /users/link-requests/:id/reject
+// RejectLinkRequest POST /users/link-requests/:requestId/reject
 func RejectLinkRequest(c *gin.Context) {
 	userID := c.MustGet("userId").(string)
-	requestID := c.Param("id")
+	requestID := c.Param("requestId")
 
 	var req models.LinkRequest
 	if err := database.DB.First(&req, "id = ?", requestID).Error; err != nil {
@@ -305,7 +349,7 @@ func ListLinkRequests(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"requests": requests})
 }
 
-// UnlinkUser handles DELETE /users/:id/link (Unfollow)
+// UnlinkUser handles DELETE /users/:username/link (Unfollow)
 func UnlinkUser(c *gin.Context) {
 	linkerID, exists := c.Get("userId")
 	if !exists {
@@ -315,9 +359,17 @@ func UnlinkUser(c *gin.Context) {
 	targetInput := c.Param("username")
 
 	var targetUser models.User
-	if err := database.DB.Where("username = ? OR id = ?", targetInput, targetInput).First(&targetUser).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
-		return
+	query := database.DB
+	if utils.IsUUID(targetInput) {
+		if err := query.Where("username = ? OR id = ?", targetInput, targetInput).First(&targetUser).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			return
+		}
+	} else {
+		if err := query.Where("username = ?", targetInput).First(&targetUser).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			return
+		}
 	}
 	actualTargetID := targetUser.ID
 
@@ -387,9 +439,17 @@ func UnlinkUser(c *gin.Context) {
 func GetLinkers(c *gin.Context) {
 	targetInput := c.Param("username")
 	var targetUser models.User
-	if err := database.DB.Where("username = ? OR id = ?", targetInput, targetInput).First(&targetUser).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
-		return
+	query := database.DB
+	if utils.IsUUID(targetInput) {
+		if err := query.Where("username = ? OR id = ?", targetInput, targetInput).First(&targetUser).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			return
+		}
+	} else {
+		if err := query.Where("username = ?", targetInput).First(&targetUser).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			return
+		}
 	}
 
 	var links []models.UserLink
@@ -417,9 +477,17 @@ func GetLinkers(c *gin.Context) {
 func GetLinked(c *gin.Context) {
 	targetInput := c.Param("username")
 	var targetUser models.User
-	if err := database.DB.Where("username = ? OR id = ?", targetInput, targetInput).First(&targetUser).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
-		return
+	query := database.DB
+	if utils.IsUUID(targetInput) {
+		if err := query.Where("username = ? OR id = ?", targetInput, targetInput).First(&targetUser).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			return
+		}
+	} else {
+		if err := query.Where("username = ?", targetInput).First(&targetUser).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			return
+		}
 	}
 
 	var links []models.UserLink
@@ -443,7 +511,7 @@ func GetLinked(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"linked": users})
 }
 
-// CheckLinkStatus handles GET /users/:id/link/status
+// CheckLinkStatus handles GET /users/:username/link/status
 func CheckLinkStatus(c *gin.Context) {
 	linkerID, exists := c.Get("userId")
 	if !exists {
@@ -453,9 +521,17 @@ func CheckLinkStatus(c *gin.Context) {
 	targetInput := c.Param("username")
 
 	var targetUser models.User
-	if err := database.DB.Where("username = ? OR id = ?", targetInput, targetInput).Select("id").First(&targetUser).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
-		return
+	query := database.DB
+	if utils.IsUUID(targetInput) {
+		if err := query.Where("username = ? OR id = ?", targetInput, targetInput).Select("id").First(&targetUser).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			return
+		}
+	} else {
+		if err := query.Where("username = ?", targetInput).Select("id").First(&targetUser).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			return
+		}
 	}
 
 	var count int64
@@ -537,6 +613,10 @@ func ReactToSnippet(c *gin.Context) {
 				return err
 			}
 			updateCounters(tx, snippetID, req.Reaction, +1)
+
+			if req.Reaction == "like" {
+				services.LogActivity(userID.(string), models.ActivityLike, snippetID, "liked a snippet")
+			}
 
 			// Handle Notification for new Like
 			if req.Reaction == "like" {
@@ -627,6 +707,7 @@ func AddComment(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to post comment"})
 		return
 	}
+	services.LogActivity(userID.(string), models.ActivityComment, snippetID, "commented on a snippet")
 
 	// Preload User for immediate display
 	database.DB.Preload("User").First(&comment, "id = ?", comment.ID)
@@ -792,4 +873,30 @@ func ReportTarget(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Report submitted successfully"})
+}
+
+// GetLikedSnippets returns all snippets liked by a user
+func GetLikedSnippets(c *gin.Context) {
+	usernameOrID := c.Param("username") // Accepting both for flexibility
+
+	var user models.User
+	if err := database.DB.Where("username = ? OR id = ?", usernameOrID, usernameOrID).First(&user).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	var reactions []models.SnippetReaction
+	if err := database.DB.Preload("Snippet.Author").Where("user_id = ? AND reaction = ?", user.ID, "like").Find(&reactions).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch liked snippets"})
+		return
+	}
+
+	snippets := make([]models.Snippet, 0, len(reactions))
+	for _, r := range reactions {
+		if r.Snippet.ID != "" { // Ensure snippet wasn't hard deleted but reaction remains (though DB should handle this with CASCADE usually)
+			snippets = append(snippets, r.Snippet)
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"snippets": snippets})
 }

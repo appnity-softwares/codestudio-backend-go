@@ -296,6 +296,7 @@ func SubmitPracticeSolution(c *gin.Context) {
 			awarded, err := services.CheckBadges(uid)
 			if err == nil && len(awarded) > 0 {
 				newBadges = awarded
+				NotifyNewBadges(uid, awarded)
 			}
 		}
 	}

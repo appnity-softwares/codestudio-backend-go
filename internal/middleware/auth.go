@@ -37,8 +37,17 @@ func AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
+		// P0 FIX: Check if token is blacklisted (revoked via logout)
+		if database.IsTokenBlacklisted(claims.GetJTI()) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Token has been revoked"})
+			c.Abort()
+			return
+		}
+
 		// Set UserID in context for handlers to use
 		c.Set("userId", claims.UserID)
+		// P0 FIX: Store claims for logout handler
+		c.Set("claims", claims)
 
 		// Verify user exists and is active (not soft-deleted)
 		var user models.User

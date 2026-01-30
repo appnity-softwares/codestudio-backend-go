@@ -14,14 +14,15 @@ func RegisterSocialRoutes(r gin.IRouter) {
 		protected := social.Group("")
 		protected.Use(middleware.AuthMiddleware(), middleware.FeatureGate(models.SettingFeatureSocialFollow, "Follower System"))
 		{
+			// Use :username to avoid conflict with user.go routes (Gin requires consistent param names)
 			protected.POST("/:username/link", handlers.LinkUser)
 			protected.DELETE("/:username/link", handlers.UnlinkUser)
 			protected.GET("/:username/link/status", handlers.CheckLinkStatus)
 
 			// v1.3: Link Requests (Private Accounts)
 			protected.GET("/link-requests", handlers.ListLinkRequests)
-			protected.POST("/link-requests/:id/accept", handlers.AcceptLinkRequest)
-			protected.POST("/link-requests/:id/reject", handlers.RejectLinkRequest)
+			protected.POST("/link-requests/:requestId/accept", handlers.AcceptLinkRequest)
+			protected.POST("/link-requests/:requestId/reject", handlers.RejectLinkRequest)
 
 			// v1.3: Safety & Moderation
 			protected.POST("/:username/block", handlers.BlockUser)
@@ -33,6 +34,7 @@ func RegisterSocialRoutes(r gin.IRouter) {
 		// Public Social Data (or Optional Auth if needed, but simple public for now)
 		social.GET("/:username/linkers", handlers.GetLinkers)
 		social.GET("/:username/linked", handlers.GetLinked)
+		social.GET("/:username/liked", handlers.GetLikedSnippets)
 	}
 
 	snippet := r.Group("/snippets")

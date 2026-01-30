@@ -103,5 +103,6 @@ func GetMigrations() []Migration {
 	return []Migration{
 		Migration001AddReplyToFK(),
 		Migration002EnsureUUIDExtension(),
+		Migration003AddPerformanceIndexes(),
 	}
 }

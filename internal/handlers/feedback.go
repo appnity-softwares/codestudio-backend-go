@@ -65,6 +65,7 @@ func CreateFeedback(c *gin.Context) {
 
 	// 5. Check for Badges
 	newBadges, _ := services.CheckBadges(userID)
+	NotifyNewBadges(userID, newBadges)
 
 	c.JSON(http.StatusCreated, gin.H{
 		"message":   feedback,

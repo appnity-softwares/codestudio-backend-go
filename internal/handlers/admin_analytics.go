@@ -31,11 +31,27 @@ func AdminGetTopSnippets(c *gin.Context) {
 
 // AdminGetSuspiciousActivity returns snippets with high fork/copy activity
 func AdminGetSuspiciousActivity(c *gin.Context) {
-	// Snippets with high copy counts (potential IP theft or popular utility)
+	// 1. Snippets with high copy counts
 	var highCopySnippets []models.Snippet
 	database.DB.Preload("Author").Order("copy_count desc").Limit(10).Find(&highCopySnippets)
 
+	// 2. Snippets with high fork counts (Aggregation)
+	type ForkStat struct {
+		ID        string `json:"id"`
+		Title     string `json:"title"`
+		ForkCount int64  `json:"forkCount"`
+	}
+	var highForkSnippets []ForkStat
+	database.DB.Table("\"Snippet\"").
+		Select("\"Snippet\".\"forkedFromId\" as id, \"s2\".\"title\", count(*) as \"forkCount\"").
+		Joins("JOIN \"Snippet\" as s2 ON s2.id = \"Snippet\".\"forkedFromId\"").
+		Group("\"Snippet\".\"forkedFromId\", \"s2\".\"title\"").
+		Order("\"forkCount\" desc").
+		Limit(10).
+		Scan(&highForkSnippets)
+
 	c.JSON(http.StatusOK, gin.H{
 		"highCopySnippets": highCopySnippets,
+		"highForkSnippets": highForkSnippets,
 	})
 }

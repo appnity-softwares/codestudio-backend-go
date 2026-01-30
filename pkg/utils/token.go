@@ -14,12 +14,29 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
+// GetJTI returns the token's unique ID for blacklist operations
+func (c *Claims) GetJTI() string {
+	return c.ID
+}
+
+// GetExpiresAt returns the token's expiration time
+func (c *Claims) GetExpiresAt() time.Time {
+	if c.ExpiresAt != nil {
+		return c.ExpiresAt.Time
+	}
+	return time.Time{}
+}
+
 func GenerateToken(userID string) (string, error) {
 	expirationTime := time.Now().Add(7 * 24 * time.Hour) // 7 days
+
+	// P0 FIX: Add unique jti for token revocation support
+	jti := uuid.New().String()
 
 	claims := &Claims{
 		UserID: userID,
 		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        jti, // P0 FIX: JWT ID for blacklist
 			ExpiresAt: jwt.NewNumericDate(expirationTime),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 			Issuer:    "devconnect-backend",

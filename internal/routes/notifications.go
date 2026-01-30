@@ -12,6 +12,7 @@ func RegisterNotificationRoutes(r gin.IRouter) {
 	{
 		notifications.GET("", handlers.GetNotifications)
 		notifications.GET("/unread-count", handlers.GetUnreadCount)
+		notifications.GET("/aggregate", handlers.GetAggregateUnreadCount)
 		notifications.PUT("/:id/read", handlers.MarkNotificationRead)
 		notifications.PUT("/read-all", handlers.MarkAllNotificationsRead)
 		notifications.DELETE("/:id", handlers.DeleteNotification)
