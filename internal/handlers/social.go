@@ -480,8 +480,8 @@ func CheckLinkStatus(c *gin.Context) {
 
 // --- Snippet Engagement ---
 
-// ToggleLikeSnippet handles POST /snippets/:id/like
-func ToggleLikeSnippet(c *gin.Context) {
+// ReactToSnippet handles POST /snippets/:id/react
+func ReactToSnippet(c *gin.Context) {
 	userID, exists := c.Get("userId")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
@@ -489,80 +489,99 @@ func ToggleLikeSnippet(c *gin.Context) {
 	}
 	snippetID := c.Param("id")
 
-	// Transaction to toggle like
-	var liked bool
-	err := database.DB.Transaction(func(tx *gorm.DB) error {
-		var like models.SnippetLike
-		result := tx.Where("user_id = ? AND snippet_id = ?", userID, snippetID).First(&like)
+	var req struct {
+		Reaction string `json:"reaction" binding:"required"`
+	}
 
-		if result.Error == nil {
-			// Like exists -> Unlike
-			if err := tx.Delete(&like).Error; err != nil {
-				return err
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+
+	if req.Reaction != "like" && req.Reaction != "dislike" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid reaction (must be 'like' or 'dislike')"})
+		return
+	}
+
+	var existing models.SnippetReaction
+	err := database.DB.Where("snippet_id = ? AND user_id = ?", snippetID, userID).First(&existing).Error
+
+	var reactionResult string = req.Reaction
+
+	dbErr := database.DB.Transaction(func(tx *gorm.DB) error {
+		if err == nil {
+			if existing.Reaction == req.Reaction {
+				// Remove reaction (toggle off)
+				if err := tx.Delete(&existing).Error; err != nil {
+					return err
+				}
+				updateCounters(tx, snippetID, existing.Reaction, -1)
+				reactionResult = ""
+			} else {
+				// Switch reaction
+				oldReaction := existing.Reaction
+				if err := tx.Model(&existing).Update("reaction", req.Reaction).Error; err != nil {
+					return err
+				}
+				updateCounters(tx, snippetID, oldReaction, -1)
+				updateCounters(tx, snippetID, req.Reaction, +1)
 			}
-			// Decrement counter (but not below 0)
-			if err := tx.Model(&models.Snippet{}).Where("id = ?", snippetID).UpdateColumn("likes_count", gorm.Expr("GREATEST(likes_count - 1, 0)")).Error; err != nil {
-				return err
-			}
-			liked = false
 		} else {
-			// Like doesn't exist -> Like
-
-			// 1. Remove Dislike if exists (Mutually Exclusive)
-			var dislike models.SnippetDislike
-			if err := tx.Where("user_id = ? AND snippet_id = ?", userID, snippetID).First(&dislike).Error; err == nil {
-				if err := tx.Delete(&dislike).Error; err != nil {
-					return err
-				}
-				if err := tx.Model(&models.Snippet{}).Where("id = ?", snippetID).UpdateColumn("dislikes_count", gorm.Expr("GREATEST(dislikes_count - 1, 0)")).Error; err != nil {
-					return err
-				}
-			}
-
-			// 2. Create Like
-			newLike := models.SnippetLike{
-				UserID:    userID.(string),
+			// New reaction
+			newReaction := models.SnippetReaction{
 				SnippetID: snippetID,
+				UserID:    userID.(string),
+				Reaction:  req.Reaction,
 			}
-			if err := tx.Create(&newLike).Error; err != nil {
+			if err := tx.Create(&newReaction).Error; err != nil {
 				return err
 			}
-			// Increment counter
-			if err := tx.Model(&models.Snippet{}).Where("id = ?", snippetID).UpdateColumn("likes_count", gorm.Expr("likes_count + ?", 1)).Error; err != nil {
-				return err
-			}
+			updateCounters(tx, snippetID, req.Reaction, +1)
 
-			// Create Notification
-			var snippet models.Snippet
-			if err := tx.Select("\"authorId\"", "title").First(&snippet, "id = ?", snippetID).Error; err == nil {
-				if snippet.AuthorID != userID.(string) {
-					notification := models.Notification{
-						UserID:    snippet.AuthorID,
-						ActorID:   userID.(string),
-						Type:      models.NotificationTypeLike,
-						SnippetID: &snippetID,
-						Message:   "liked your snippet: " + snippet.Title,
+			// Handle Notification for new Like
+			if req.Reaction == "like" {
+				var snippet models.Snippet
+				if err := tx.Select("\"authorId\"", "title").First(&snippet, "id = ?", snippetID).Error; err == nil {
+					if snippet.AuthorID != userID.(string) {
+						notification := models.Notification{
+							UserID:    snippet.AuthorID,
+							ActorID:   userID.(string),
+							Type:      models.NotificationTypeLike,
+							SnippetID: &snippetID,
+							Message:   "liked your snippet: " + snippet.Title,
+						}
+						CreateNotification(tx, notification)
 					}
-					CreateNotification(tx, notification)
 				}
 			}
-
-			liked = true
 		}
 		return nil
 	})
 
-	if err != nil {
-		fmt.Printf("[Social] ToggleLikeSnippet FAILED for snippet %s, user %s: %v\n", snippetID, userID, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to toggle like", "details": err.Error()})
+	if dbErr != nil {
+		fmt.Printf("[Social] ReactToSnippet FAILED for snippet %s, user %s: %v\n", snippetID, userID, dbErr)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to react to snippet", "details": dbErr.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"liked": liked})
+	c.JSON(http.StatusOK, gin.H{
+		"status":   "ok",
+		"reaction": reactionResult,
+	})
 }
 
-// ToggleDislikeSnippet handles POST /snippets/:id/dislike
-func ToggleDislikeSnippet(c *gin.Context) {
+// updateCounters Atomically updates snippet stats
+func updateCounters(tx *gorm.DB, snippetID string, reaction string, delta int) {
+	field := "likes_count"
+	if reaction == "dislike" {
+		field = "dislikes_count"
+	}
+
+	tx.Model(&models.Snippet{}).Where("id = ?", snippetID).UpdateColumn(field, gorm.Expr(fmt.Sprintf("GREATEST(%s + ?, 0)", field), delta))
+}
+
+// CheckSnippetReaction handles GET /snippets/:id/react
+func CheckSnippetReaction(c *gin.Context) {
 	userID, exists := c.Get("userId")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
@@ -570,76 +589,13 @@ func ToggleDislikeSnippet(c *gin.Context) {
 	}
 	snippetID := c.Param("id")
 
-	var disliked bool
-	err := database.DB.Transaction(func(tx *gorm.DB) error {
-		var dislike models.SnippetDislike
-		result := tx.Where("user_id = ? AND snippet_id = ?", userID, snippetID).First(&dislike)
-
-		if result.Error == nil {
-			// Dislike exists -> Remove Dislike
-			if err := tx.Delete(&dislike).Error; err != nil {
-				return err
-			}
-			if err := tx.Model(&models.Snippet{}).Where("id = ?", snippetID).UpdateColumn("dislikes_count", gorm.Expr("GREATEST(dislikes_count - 1, 0)")).Error; err != nil {
-				return err
-			}
-			disliked = false
-		} else {
-			// Dislike doesn't exist -> Dislike
-
-			// 1. Remove Like if exists (Mutually Exclusive)
-			var like models.SnippetLike
-			if err := tx.Where("user_id = ? AND snippet_id = ?", userID, snippetID).First(&like).Error; err == nil {
-				if err := tx.Delete(&like).Error; err != nil {
-					return err
-				}
-				if err := tx.Model(&models.Snippet{}).Where("id = ?", snippetID).UpdateColumn("likes_count", gorm.Expr("GREATEST(likes_count - 1, 0)")).Error; err != nil {
-					return err
-				}
-			}
-
-			// 2. Create Dislike
-			newDislike := models.SnippetDislike{
-				UserID:    userID.(string),
-				SnippetID: snippetID,
-			}
-			if err := tx.Create(&newDislike).Error; err != nil {
-				return err
-			}
-			if err := tx.Model(&models.Snippet{}).Where("id = ?", snippetID).UpdateColumn("dislikes_count", gorm.Expr("dislikes_count + ?", 1)).Error; err != nil {
-				return err
-			}
-
-			disliked = true
-		}
-		return nil
-	})
-
-	if err != nil {
-		fmt.Printf("[Social] ToggleDislikeSnippet FAILED for snippet %s, user %s: %v\n", snippetID, userID, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to toggle dislike", "details": err.Error()})
+	var reaction models.SnippetReaction
+	if err := database.DB.Where("user_id = ? AND snippet_id = ?", userID, snippetID).First(&reaction).Error; err != nil {
+		c.JSON(http.StatusOK, gin.H{"reaction": ""})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"disliked": disliked})
-}
-
-// CheckSnippetLike handles GET /snippets/:id/like
-func CheckSnippetLike(c *gin.Context) {
-	userID, exists := c.Get("userId")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-		return
-	}
-	snippetID := c.Param("id")
-
-	var likeCount int64
-	database.DB.Model(&models.SnippetLike{}).Where("user_id = ? AND snippet_id = ?", userID, snippetID).Count(&likeCount)
-
-	var dislikeCount int64
-	database.DB.Model(&models.SnippetDislike{}).Where("user_id = ? AND snippet_id = ?", userID, snippetID).Count(&dislikeCount)
-
-	c.JSON(http.StatusOK, gin.H{"liked": likeCount > 0, "disliked": dislikeCount > 0})
+	c.JSON(http.StatusOK, gin.H{"reaction": reaction.Reaction})
 }
 
 // --- Comments ---

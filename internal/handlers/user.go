@@ -537,6 +537,53 @@ func EquipAura(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Aura updated successfully", "equippedAura": input.AuraID})
 }
 
+// EquipTheme handles POST /users/profile/equip-theme
+func EquipTheme(c *gin.Context) {
+	userId, exists := c.Get("userId")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	var input struct {
+		ThemeID string `json:"themeId"` // Can be empty to unequip
+	}
+
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
+		return
+	}
+
+	var user models.User
+	if err := database.DB.First(&user, "id = ?", userId).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	// Verify ownership if it's a specific theme (not empty)
+	if input.ThemeID != "" {
+		owned := false
+		for _, id := range user.PurchasedComponentIds {
+			if id == input.ThemeID {
+				owned = true
+				break
+			}
+		}
+
+		if !owned {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Item not owned"})
+			return
+		}
+	}
+
+	if err := database.DB.Model(&user).Update("equippedTheme", input.ThemeID).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to equip theme"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Theme updated successfully", "equippedTheme": input.ThemeID})
+}
+
 // ListCommunityUsers handles GET /community/users
 func ListCommunityUsers(c *gin.Context) {
 	// Filters: ?search= &sort= &page=
@@ -624,6 +671,8 @@ func ListCommunityUsers(c *gin.Context) {
 			"contestCount": contestCount,
 			"languages":    u.PreferredLanguages,
 			"interests":    u.Interests,
+			"equippedAura": u.EquippedAura,
+			"xp":           u.XP,
 		})
 	}
 
@@ -817,7 +866,7 @@ func GetUserSnippets(c *gin.Context) {
 		return
 	}
 
-	// 3. Populate Interaction Status (IsLiked/IsDisliked)
+	// 3. Populate Interaction Status (ViewerReaction)
 	if viewerID != "" {
 		var snippetIDs []string
 		for _, s := range snippets {
@@ -825,29 +874,18 @@ func GetUserSnippets(c *gin.Context) {
 		}
 
 		if len(snippetIDs) > 0 {
-			var likes []models.SnippetLike
-			database.DB.Select("snippet_id").Where("user_id = ? AND snippet_id IN ?", viewerID, snippetIDs).Find(&likes)
+			var reactions []models.SnippetReaction
+			database.DB.Select("snippet_id", "reaction").Where("user_id = ? AND snippet_id IN ?", viewerID, snippetIDs).Find(&reactions)
 
-			likedMap := make(map[string]bool)
-			for _, l := range likes {
-				likedMap[l.SnippetID] = true
-			}
-
-			var dislikes []models.SnippetDislike
-			database.DB.Select("snippet_id").Where("user_id = ? AND snippet_id IN ?", viewerID, snippetIDs).Find(&dislikes)
-
-			dislikedMap := make(map[string]bool)
-			for _, d := range dislikes {
-				dislikedMap[d.SnippetID] = true
+			reactionMap := make(map[string]string)
+			for _, r := range reactions {
+				reactionMap[r.SnippetID] = r.Reaction
 			}
 
 			// Map back to result
 			for i := range snippets {
-				if likedMap[snippets[i].ID] {
-					snippets[i].IsLiked = true
-				}
-				if dislikedMap[snippets[i].ID] {
-					snippets[i].IsDisliked = true
+				if r, ok := reactionMap[snippets[i].ID]; ok {
+					snippets[i].ViewerReaction = r
 				}
 			}
 		}
@@ -1047,12 +1085,13 @@ func GetGlobalLeaderboard(c *gin.Context) {
 	var safeUsers []gin.H
 	for i, u := range users {
 		safeUsers = append(safeUsers, gin.H{
-			"rank":     i + 1,
-			"username": u.Username,
-			"name":     u.Name,
-			"image":    u.Image,
-			"xp":       u.XP,
-			"id":       u.ID,
+			"rank":         i + 1,
+			"username":     u.Username,
+			"name":         u.Name,
+			"image":        u.Image,
+			"xp":           u.XP,
+			"equippedAura": u.EquippedAura,
+			"id":           u.ID,
 		})
 	}
 
@@ -1069,7 +1108,7 @@ func SpendXP(c *gin.Context) {
 
 	var input struct {
 		ItemID string `json:"itemId" binding:"required"`
-		Amount int    `json:"amount" binding:"required"`
+		Amount int    `json:"amount"`
 	}
 
 	if err := c.ShouldBindJSON(&input); err != nil {

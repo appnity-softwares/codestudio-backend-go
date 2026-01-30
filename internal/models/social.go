@@ -20,28 +20,19 @@ type UserLink struct {
 	Linked   User   `gorm:"foreignKey:LinkedID" json:"linked"`
 }
 
-// SnippetLike represents a like on a snippet
-type SnippetLike struct {
+// SnippetReaction represents a like or dislike on a snippet
+type SnippetReaction struct {
 	ID        string    `gorm:"primaryKey;type:text;default:uuid_generate_v4()" json:"id"`
 	CreatedAt time.Time `json:"createdAt"`
 
-	UserID string `gorm:"uniqueIndex:idx_user_snippet_like" json:"userId"`
+	UserID string `gorm:"uniqueIndex:idx_user_snippet_reaction" json:"userId"`
 	User   User   `gorm:"foreignKey:UserID" json:"user"`
 
-	SnippetID string  `gorm:"uniqueIndex:idx_user_snippet_like" json:"snippetId"`
+	SnippetID string  `gorm:"uniqueIndex:idx_user_snippet_reaction" json:"snippetId"`
 	Snippet   Snippet `gorm:"foreignKey:SnippetID" json:"snippet"`
-}
 
-// SnippetDislike represents a dislike on a snippet
-type SnippetDislike struct {
-	ID        string    `gorm:"primaryKey;type:text;default:uuid_generate_v4()" json:"id"`
-	CreatedAt time.Time `json:"createdAt"`
-
-	UserID string `gorm:"uniqueIndex:idx_user_snippet_dislike" json:"userId"`
-	User   User   `gorm:"foreignKey:UserID" json:"user"`
-
-	SnippetID string  `gorm:"uniqueIndex:idx_user_snippet_dislike" json:"snippetId"`
-	Snippet   Snippet `gorm:"foreignKey:SnippetID" json:"snippet"`
+	// like | dislike
+	Reaction string `gorm:"type:text;not null" json:"reaction"`
 }
 
 // Comment represents a comment on a snippet
@@ -71,24 +62,13 @@ func (ul *UserLink) BeforeCreate(tx *gorm.DB) (err error) {
 	return
 }
 
-func (SnippetLike) TableName() string {
-	return "SnippetLike"
+func (SnippetReaction) TableName() string {
+	return "SnippetReaction"
 }
 
-func (sl *SnippetLike) BeforeCreate(tx *gorm.DB) (err error) {
-	if sl.ID == "" {
-		sl.ID = uuid.New().String()
-	}
-	return
-}
-
-func (SnippetDislike) TableName() string {
-	return "SnippetDislike"
-}
-
-func (sd *SnippetDislike) BeforeCreate(tx *gorm.DB) (err error) {
-	if sd.ID == "" {
-		sd.ID = uuid.New().String()
+func (sr *SnippetReaction) BeforeCreate(tx *gorm.DB) (err error) {
+	if sr.ID == "" {
+		sr.ID = uuid.New().String()
 	}
 	return
 }

@@ -83,6 +83,7 @@ type User struct {
 	XP                  int    `gorm:"default:0" json:"xp"`
 	Level               int    `gorm:"default:1" json:"level"`
 	EquippedAura        string `gorm:"column:equippedAura" json:"equippedAura"`
+	EquippedTheme       string `gorm:"column:equippedTheme" json:"equippedTheme"`
 
 	// Social & Engagement (Cached)
 	LinkersCount int `gorm:"default:0;column:linkersCount" json:"linkersCount"` // Followers

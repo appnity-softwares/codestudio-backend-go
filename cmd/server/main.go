@@ -83,8 +83,7 @@ func main() {
 		&models.Playlist{},
 		&models.PlaylistSnippet{},
 		&models.UserLink{},
-		&models.SnippetLike{},
-		&models.SnippetDislike{},
+		&models.SnippetReaction{},
 		&models.Comment{},
 		&models.Badge{},
 		&models.UserBadge{},
@@ -95,6 +94,7 @@ func main() {
 		// Phase 7: Chat Reactions & Mentions
 		&models.MessageReaction{},
 		&models.Mention{},
+		&models.ShortLink{},
 	}
 
 	for _, m := range tableModels {
@@ -178,6 +178,7 @@ func main() {
 		// Public system status (for maintenance page)
 		api.GET("/system/status", handlers.PublicGetSystemStatus)
 		api.GET("/landing/stats", handlers.PublicGetLandingStats)
+		routes.RegisterShortenerAPIRoutes(api)
 
 		// Protected routes - apply maintenance mode check
 		protected := api.Group("")
@@ -237,6 +238,9 @@ func main() {
 	// Sitemap & SEO
 	r.GET("/sitemap.xml", handlers.GenerateSitemap)
 	r.GET("/robots.txt", handlers.GenerateRobotsTXT)
+
+	// Shortener Redirect
+	routes.RegisterShortenerRoutes(r)
 
 	// Init Socket.io
 	socketServer := handlers.InitSocketServer()

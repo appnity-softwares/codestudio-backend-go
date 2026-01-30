@@ -40,8 +40,7 @@ type Snippet struct {
 	IsFeatured    bool `gorm:"default:false;index" json:"isFeatured"`
 
 	// Virtual Fields (Auth Context)
-	IsLiked    bool `gorm:"-" json:"isLiked"`
-	IsDisliked bool `gorm:"-" json:"isDisliked"`
+	ViewerReaction string `gorm:"-" json:"viewerReaction"` // "like", "dislike", or ""
 
 	// Execution Validation
 	Status              string `gorm:"default:'DRAFT'" json:"status"` // DRAFT, PUBLISHED

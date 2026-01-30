@@ -289,12 +289,24 @@ func GoogleCallback(c *gin.Context) {
 }
 
 // GitHub
+// GitHub
 func GithubLogin(c *gin.Context) {
 	if githubOauthConfig == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "GitHub OAuth not configured"})
 		return
 	}
-	url := githubOauthConfig.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
+
+	state := "state-token" // Default login state
+
+	// Check if this is a linking request (authenticated user)
+	tokenStr := c.Query("auth_token")
+	if tokenStr != "" {
+		if claims, err := utils.ValidateToken(tokenStr); err == nil {
+			state = "LINK:" + claims.UserID
+		}
+	}
+
+	url := githubOauthConfig.AuthCodeURL(state, oauth2.AccessTypeOffline)
 	c.Redirect(http.StatusTemporaryRedirect, url)
 }
 
@@ -302,6 +314,13 @@ func GithubCallback(c *gin.Context) {
 	if githubOauthConfig == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "GitHub OAuth not configured"})
 		return
+	}
+
+	state := c.Query("state")
+	isLinkMode := strings.HasPrefix(state, "LINK:")
+	var linkUserID string
+	if isLinkMode {
+		linkUserID = strings.TrimPrefix(state, "LINK:")
 	}
 
 	code := c.Query("code")
@@ -324,7 +343,8 @@ func GithubCallback(c *gin.Context) {
 		Login     string `json:"login"` // Username
 		Name      string `json:"name"`
 		AvatarURL string `json:"avatar_url"`
-		Email     string `json:"email"` // Might be empty if private
+		Email     string `json:"email"`
+		HtmlUrl   string `json:"html_url"`
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&userInfo); err != nil {
@@ -332,15 +352,40 @@ func GithubCallback(c *gin.Context) {
 		return
 	}
 
-	// If email is missing, fetch it
-	email := userInfo.Email
-	if email == "" {
-		email = fmt.Sprintf("%s@github.placeholder", userInfo.Login) // Fallback for now
+	var user *models.User
+
+	if isLinkMode {
+		// LINKING LOGIC: Find existing user and update
+		var existingUser models.User
+		if err := database.DB.First(&existingUser, "id = ?", linkUserID).Error; err == nil {
+			// Update GitHub specific fields
+			existingUser.GithubURL = userInfo.HtmlUrl
+			if existingUser.GithubURL == "" {
+				existingUser.GithubURL = fmt.Sprintf("https://github.com/%s", userInfo.Login)
+			}
+			// We don't overwrite name/image/email during linking to preserve profile
+			database.DB.Save(&existingUser)
+			user = &existingUser
+			logger.Info().Str("user_id", user.ID).Msg("Linked GitHub account successfully")
+		} else {
+			// Existing user not found? Fallback to standard login maybe?
+			// Or just error out. Safer to error or fallback.
+			logger.Warn().Str("user_id", linkUserID).Msg("Link mode failed: user not found, falling back to login")
+		}
 	}
 
-	user := handleOAuthLogin(c, email, userInfo.Name, userInfo.AvatarURL)
+	// If not link mode or link failed, try standard login/register
+	if user == nil {
+		// Login/Register Logic
+		email := userInfo.Email
+		if email == "" {
+			email = fmt.Sprintf("%s@github.placeholder", userInfo.Login) // Fallback
+		}
+		user = handleOAuthLogin(c, email, userInfo.Name, userInfo.AvatarURL)
+	}
+
+	// Background fetch stats
 	if user != nil && database.IsFeatureEnabled(models.SettingFeatureGithubStats) {
-		// Fetch stats in background
 		go func(tokenStr string, u models.User) {
 			if err := FetchAndStoreGithubStats(tokenStr, &u); err != nil {
 				logger.Error().Err(err).Str("user_id", u.ID).Msg("Failed to background sync GitHub stats")

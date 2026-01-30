@@ -179,18 +179,20 @@ func ExecuteCode(language, code, stdin string, timeLimit float64, memoryLimit in
 	if runMemory > 0 && runMemory < 10000 {
 		runMemory = runMemory * 1024 * 1024 // Convert MB to Bytes
 	} else if runMemory == 0 {
-		runMemory = 512 * 1024 * 1024 // Default 512MB (increased from 128MB to avoid OOM)
+		runMemory = 512 * 1024 * 1024 // Default 512MB (Safe balance for public API nodes)
 	}
 
 	// Normalize language name for Piston API
 	pistonLang := normalizePistonLanguage(language)
 	fileName := getFileExtension(language)
+	workingCode := code
 
+	// Build request
 	reqBody := PistonExecuteRequest{
 		Language: pistonLang,
 		Version:  version,
 		Files: []File{
-			{Name: fileName, Content: code},
+			{Name: fileName, Content: workingCode},
 		},
 		Stdin:          stdin,
 		RunTimeout:     runTimeout,

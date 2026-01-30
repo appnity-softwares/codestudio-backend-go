@@ -106,25 +106,18 @@ func ListSnippets(c *gin.Context) {
 		return
 	}
 
-	// Populate IsLiked for authenticated users
+	// Populate ViewerReaction for authenticated users
 	if userID, exists := c.Get("userId"); exists {
 		var snippetIDs []string
 		for _, s := range snippets {
 			snippetIDs = append(snippetIDs, s.ID)
 		}
 		if len(snippetIDs) > 0 {
-			likedMap := make(map[string]bool)
-			var likes []models.SnippetLike
-			database.DB.Select("snippet_id").Where("user_id = ? AND snippet_id IN ?", userID, snippetIDs).Find(&likes)
-			for _, l := range likes {
-				likedMap[l.SnippetID] = true
-			}
-
-			dislikedMap := make(map[string]bool)
-			var dislikes []models.SnippetDislike
-			database.DB.Select("snippet_id").Where("user_id = ? AND snippet_id IN ?", userID, snippetIDs).Find(&dislikes)
-			for _, d := range dislikes {
-				dislikedMap[d.SnippetID] = true
+			reactionMap := make(map[string]string)
+			var reactions []models.SnippetReaction
+			database.DB.Select("snippet_id", "reaction").Where("user_id = ? AND snippet_id IN ?", userID, snippetIDs).Find(&reactions)
+			for _, r := range reactions {
+				reactionMap[r.SnippetID] = r.Reaction
 			}
 
 			var follows []models.UserLink
@@ -139,11 +132,8 @@ func ListSnippets(c *gin.Context) {
 			}
 
 			for i := range snippets {
-				if likedMap[snippets[i].ID] {
-					snippets[i].IsLiked = true
-				}
-				if dislikedMap[snippets[i].ID] {
-					snippets[i].IsDisliked = true
+				if r, ok := reactionMap[snippets[i].ID]; ok {
+					snippets[i].ViewerReaction = r
 				}
 				if followMap[snippets[i].AuthorID] {
 					snippets[i].Author.IsFollowing = true
@@ -245,15 +235,12 @@ func GetSnippet(c *gin.Context) {
 		return
 	}
 
-	// Populate IsLiked for authenticated users
+	// Populate ViewerReaction for authenticated users
 	if userID, exists := c.Get("userId"); exists {
-		var count int64
-		database.DB.Model(&models.SnippetLike{}).Where("user_id = ? AND snippet_id = ?", userID, snippet.ID).Count(&count)
-		snippet.IsLiked = count > 0
-
-		var dislikeCount int64
-		database.DB.Model(&models.SnippetDislike{}).Where("user_id = ? AND snippet_id = ?", userID, snippet.ID).Count(&dislikeCount)
-		snippet.IsDisliked = dislikeCount > 0
+		var reaction models.SnippetReaction
+		if err := database.DB.Select("reaction").Where("user_id = ? AND snippet_id = ?", userID, snippet.ID).First(&reaction).Error; err == nil {
+			snippet.ViewerReaction = reaction.Reaction
+		}
 
 		var followCount int64
 		database.DB.Model(&models.UserLink{}).Where("linker_id = ? AND linked_id = ?", userID, snippet.AuthorID).Count(&followCount)
@@ -371,11 +358,8 @@ func DeleteSnippet(c *gin.Context) {
 			return err
 		}
 
-		// 3. Delete Likes & Dislikes
-		if err := tx.Where("snippet_id = ?", snippet.ID).Delete(&models.SnippetLike{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("snippet_id = ?", snippet.ID).Delete(&models.SnippetDislike{}).Error; err != nil {
+		// 3. Delete Reactions
+		if err := tx.Where("snippet_id = ?", snippet.ID).Delete(&models.SnippetReaction{}).Error; err != nil {
 			return err
 		}
 
@@ -635,8 +619,7 @@ func GetFeed(c *gin.Context) {
 		return
 	}
 
-	// Populate IsLiked for authenticated users
-	// Populate IsLiked for authenticated users
+	// Populate ViewerReaction for authenticated users
 	if viewerID != "" {
 		var snippetIDs []string
 		for _, s := range snippets {
@@ -644,20 +627,12 @@ func GetFeed(c *gin.Context) {
 		}
 
 		if len(snippetIDs) > 0 {
-			var likes []models.SnippetLike
-			database.DB.Select("snippet_id").Where("user_id = ? AND snippet_id IN ?", viewerID, snippetIDs).Find(&likes)
+			var reactions []models.SnippetReaction
+			database.DB.Select("snippet_id", "reaction").Where("user_id = ? AND snippet_id IN ?", viewerID, snippetIDs).Find(&reactions)
 
-			likedMap := make(map[string]bool)
-			for _, l := range likes {
-				likedMap[l.SnippetID] = true
-			}
-
-			var dislikes []models.SnippetDislike
-			database.DB.Select("snippet_id").Where("user_id = ? AND snippet_id IN ?", viewerID, snippetIDs).Find(&dislikes)
-
-			dislikedMap := make(map[string]bool)
-			for _, d := range dislikes {
-				dislikedMap[d.SnippetID] = true
+			reactionMap := make(map[string]string)
+			for _, r := range reactions {
+				reactionMap[r.SnippetID] = r.Reaction
 			}
 
 			var follows []models.UserLink
@@ -673,11 +648,8 @@ func GetFeed(c *gin.Context) {
 
 			// Map back to result
 			for i := range snippets {
-				if likedMap[snippets[i].ID] {
-					snippets[i].IsLiked = true
-				}
-				if dislikedMap[snippets[i].ID] {
-					snippets[i].IsDisliked = true
+				if r, ok := reactionMap[snippets[i].ID]; ok {
+					snippets[i].ViewerReaction = r
 				}
 				if followMap[snippets[i].AuthorID] {
 					snippets[i].Author.IsFollowing = true

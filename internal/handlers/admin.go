@@ -340,10 +340,8 @@ func AdminDeleteSnippet(c *gin.Context) {
 		if err := tx.Unscoped().Where("snippet_id = ?", snippetID).Delete(&models.Notification{}).Error; err != nil {
 			return err
 		}
-		if err := tx.Unscoped().Where("snippet_id = ?", snippetID).Delete(&models.SnippetLike{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Unscoped().Where("snippet_id = ?", snippetID).Delete(&models.SnippetDislike{}).Error; err != nil {
+		// 4. Delete Snippet Reactions
+		if err := tx.Where("snippet_id = ?", snippet.ID).Delete(&models.SnippetReaction{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Unscoped().Where("snippet_id = ?", snippetID).Delete(&models.Comment{}).Error; err != nil {
@@ -899,9 +897,8 @@ func AdminDeleteUser(c *gin.Context) {
 
 		// 2. Content (Snippets & Comments)
 		// Note: Snippets might have their own dependencies (Likes, Comments).
-		// Ideally DB has ON DELETE CASCADE, but to be safe we delete what we can.
-		tx.Unscoped().Where("user_id = ?", targetUserID).Delete(&models.SnippetLike{})
-		tx.Unscoped().Where("user_id = ?", targetUserID).Delete(&models.SnippetDislike{})
+		// Ideally DB has ON DELETE CASCADE, but to be safe we		// Delete user reactions
+		tx.Where("user_id = ?", targetUserID).Delete(&models.SnippetReaction{})
 		tx.Unscoped().Where("user_id = ?", targetUserID).Delete(&models.Comment{})
 		// Delete snippets authored by user
 		tx.Unscoped().Where("\"authorId\" = ?", targetUserID).Delete(&models.Snippet{})
